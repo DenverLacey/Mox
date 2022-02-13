@@ -7,6 +7,29 @@ pub struct AST {
 	locations: Vec<CodeLocation>,
 }
 
+impl AST {
+	pub fn new() -> Self {
+		Self {
+			nodes: Vec::new(),
+			locations: Vec::new(),
+		}
+	}
+
+	pub fn add_node(&mut self, node: Node, location: CodeLocation) -> usize {
+		self.nodes.push(node);
+		self.locations.push(location);
+		self.nodes.len() - 1
+	}
+
+	pub fn get(&self, index: usize) -> &Node {
+		&self.nodes[index]
+	}
+
+	pub fn get_mut(&mut self, index: usize) -> &mut Node {
+		&mut self.nodes[index]
+	}
+}
+
 #[derive(Debug)]
 pub struct Node {
 	pub kind: NodeKind,
