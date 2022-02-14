@@ -48,6 +48,9 @@ impl Token {
 
 			// Operators
 			Plus => TokenPrecedence::Term,
+			Dash => TokenPrecedence::Term,
+			Star => TokenPrecedence::Factor,
+			Slash => TokenPrecedence::Factor,
 		}
 	}
 }
@@ -66,6 +69,9 @@ pub enum TokenData {
 
 	// Operators
 	Plus,
+	Dash,
+	Star,
+	Slash,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
@@ -88,6 +94,16 @@ enum TokenPrecedence {
 	Unary,      // ! ~
 	Call,       // . () []
 	Primary,
+}
+
+impl TokenPrecedence {
+	fn next(self) -> Self {
+		const PRIMARY: u8 = TokenPrecedence::Primary as u8;
+		let p = self as u8;
+		let p1 = p + 1;
+		let p = if p1 > PRIMARY { PRIMARY } else { p1 };
+		unsafe { std::mem::transmute(p) }
+	}
 }
 
 #[derive(Debug)]
@@ -246,6 +262,18 @@ impl<'a> Tokenizer<'a> {
 				TokenData::Plus,
 				CodeLocation::new(0, 0, String::new()),
 			)),
+			'-' => Ok(Token::new(
+				TokenData::Dash,
+				CodeLocation::new(0, 0, String::new()),
+			)),
+			'*' => Ok(Token::new(
+				TokenData::Star,
+				CodeLocation::new(0, 0, String::new()),
+			)),
+			'/' => Ok(Token::new(
+				TokenData::Slash,
+				CodeLocation::new(0, 0, String::new()),
+			)),
 			c => Err(format!("Unknown operator `{}`.", c)),
 		}
 	}
@@ -296,9 +324,9 @@ impl<'a> Parser<'a> {
 		if false {
 			todo!("This is where statement parsing functions will go.");
 		} else {
-			let idx = self.parse_expression_or_assignment();
+			let idx = self.parse_expression_or_assignment()?;
 			self.expect_statement_terminator("Expected end of statement!")?;
-			idx
+			Ok(idx)
 		}
 	}
 
@@ -316,7 +344,6 @@ impl<'a> Parser<'a> {
 
 	fn parse_precedence(&mut self, precedence: TokenPrecedence) -> Result<usize, String> {
 		let token = self.tokenizer.next()?.ok_or("Unexpected end of file!")?;
-
 		let mut previous = self.parse_prefix(token)?;
 		while precedence
 			<= self
@@ -333,10 +360,60 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_prefix(&mut self, token: Token) -> Result<usize, String> {
-		todo!()
+		use TokenData::*;
+		match token.data {
+			Bool(value) => Ok(self.ast.add_node(Node::new_bool(value), token.location)),
+			Int(value) => Ok(self.ast.add_node(Node::new_int(value), token.location)),
+			Num(value) => Ok(self.ast.add_node(Node::new_num(value), token.location)),
+			Str(_value) => todo!(),
+			_ => Err(format!("`{:?}` is not a prefix operation!", token)),
+		}
 	}
 
 	fn parse_infix(&mut self, token: Token, previous: usize) -> Result<usize, String> {
-		todo!()
+		use TokenData::*;
+		match token.data {
+			Plus => self.parse_binary(token.precedence(), NodeKind::Add, previous, token.location),
+			Dash => self.parse_binary(
+				token.precedence(),
+				NodeKind::Subtract,
+				previous,
+				token.location,
+			),
+			Star => self.parse_binary(
+				token.precedence(),
+				NodeKind::Multiply,
+				previous,
+				token.location,
+			),
+			Slash => self.parse_binary(
+				token.precedence(),
+				NodeKind::Divide,
+				previous,
+				token.location,
+			),
+			_ => Err(format!("`{:?}` is not an infix operation!", token)),
+		}
 	}
+
+	fn parse_binary(
+		&mut self,
+		precedence: TokenPrecedence,
+		kind: NodeKind,
+		lhs: usize,
+		location: CodeLocation,
+	) -> Result<usize, String> {
+		let precedence = precedence.next();
+		let rhs = self.parse_precedence(precedence)?;
+		Ok(self.ast.add_node(Node::new(kind, lhs, rhs), location))
+	}
+}
+
+pub fn parse<'a>(source: Peekable<Chars<'a>>, filename: Option<String>) -> Result<AST, String> {
+	let mut p = Parser::new(source);
+	while p.tokenizer.peek()?.is_some() {
+		let root = p.parse_declaration()?;
+		p.ast.add_root(root);
+	}
+	Ok(p.ast)
 }

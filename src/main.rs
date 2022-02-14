@@ -2,27 +2,17 @@ mod ast;
 mod parser;
 mod value;
 
-use parser::*;
+use parser::parse;
 
 fn main() {
 	let source = r#"
-	1 + 2.4
+	1 + 2.4 * 2;
+	9 - 3 / 3;
 	"#;
-	let mut t = Tokenizer::new(source.chars().peekable());
 
-	println!("Peek:");
-	println!("\t{:?}", t.peek());
-	println!("\t{:?}", t.peek());
-
-	println!("PeekN:");
-	println!("\t{:?}", t.peek_n(0));
-	println!("\t{:?}", t.peek_n(1));
-	println!("\t{:?}", t.peek_n(2));
-	println!("\t{:?}", t.peek_n(3));
-
-	println!("Next:");
-	while let Some(token) = t.next().unwrap() {
-		println!("\t{:?}", token);
+	match parse(source.chars().peekable(), Some("<TODO>".to_string())) {
+		Ok(ast) => println!("{}", ast),
+		Err(err) => eprintln!("Error: {}", err),
 	}
 
 	println!("sizeof(AST) = {}", std::mem::size_of::<ast::AST>());
