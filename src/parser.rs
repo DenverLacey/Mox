@@ -1,9 +1,10 @@
 use crate::ast::{Node, NodeKind, AST};
 use std::collections::VecDeque;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::iter::Peekable;
 use std::str::Chars;
 
+#[derive(Clone, Debug)]
 pub struct CodeLocation {
 	pub line: usize,
 	pub col: usize,
@@ -16,9 +17,9 @@ impl CodeLocation {
 	}
 }
 
-impl Debug for CodeLocation {
+impl Display for CodeLocation {
 	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-		write!(f, "{}:{}:{}", self.line, self.col, self.file)
+		write!(f, "{}:{}:{}", self.line + 1, self.col + 1, self.file)
 	}
 }
 
@@ -113,6 +114,7 @@ pub struct Tokenizer<'a> {
 
 	line: usize,
 	coloumn: usize,
+	token_location: CodeLocation,
 }
 
 impl<'a> Tokenizer<'a> {
@@ -122,11 +124,52 @@ impl<'a> Tokenizer<'a> {
 			peeked_tokens: VecDeque::new(),
 			line: 0,
 			coloumn: 0,
+			token_location: CodeLocation::new(0, 0, "<TODO>".to_string()),
 		}
+	}
+
+	fn record_token_location(&mut self) {
+		self.token_location.line = self.line;
+		self.token_location.col = self.coloumn;
+	}
+
+	fn current_location(&self) -> CodeLocation {
+		CodeLocation::new(self.line, self.coloumn, "<TODO>".to_string())
 	}
 }
 
 impl<'a> Tokenizer<'a> {
+	fn peek_char(&mut self) -> Option<&char> {
+		self.source.peek()
+	}
+
+	fn next_char(&mut self) -> Option<char> {
+		let maybe_next_char = self.source.next();
+		if maybe_next_char.is_some() {
+			self.coloumn += 1;
+		}
+		maybe_next_char
+	}
+
+	fn next_char_if<F>(&mut self, f: F) -> Option<char>
+	where
+		F: FnOnce(&char) -> bool,
+	{
+		let maybe_next_char = self.source.next_if(f);
+		if maybe_next_char.is_some() {
+			self.coloumn += 1;
+		}
+		maybe_next_char
+	}
+
+	fn next_char_if_eq(&mut self, c: char) -> Option<char> {
+		let maybe_next_char = self.source.next_if_eq(&c);
+		if maybe_next_char.is_some() {
+			self.coloumn += 1;
+		}
+		maybe_next_char
+	}
+
 	pub fn peek(&mut self) -> Result<Option<&Token>, String> {
 		if self.peeked_tokens.is_empty() {
 			let t = self.next()?;
@@ -169,15 +212,16 @@ impl<'a> Tokenizer<'a> {
 
 	fn next_no_peeking(&mut self) -> Result<Option<Token>, String> {
 		self.skip_to_begining_of_next_token();
+		self.record_token_location();
 
-		if let Some(&c) = self.source.peek() {
+		if let Some(&c) = self.peek_char() {
 			if c == '\0' {
 				Ok(None)
 			} else if c == '\n' {
-				self.source.next().expect("We've already peeked this");
+				self.next_char().expect("We've already peeked this");
 				Ok(Some(Token::new(
 					TokenData::Newline,
-					CodeLocation::new(0, 0, String::new()),
+					self.token_location.clone(),
 				)))
 			} else if c.is_ascii_digit() {
 				Ok(Some(self.tokenize_number()?))
@@ -193,22 +237,26 @@ impl<'a> Tokenizer<'a> {
 
 	fn skip_to_begining_of_next_token(&mut self) {
 		loop {
-			match self.source.peek() {
+			match self.peek_char() {
 				None => break,
 				Some(c) => match c {
 					'#' => {
 						loop {
-							if matches!(self.source.next(), Some('\n') | None) {
+							if matches!(self.next_char(), Some('\n') | None) {
 								break;
 							}
 						}
 						self.line += 1;
 						self.coloumn = 0;
 					}
+					'\n' => {
+						self.source.next().expect("We already checked for `None`.");
+						self.line += 1;
+						self.coloumn = 0;
+					}
 					_ if !c.is_whitespace() => break,
 					_ => {
-						self.source.next().expect("We already checked for `None`.");
-						self.coloumn += 1;
+						self.next_char().expect("We already checked for `None`.");
 					}
 				},
 			}
@@ -218,32 +266,33 @@ impl<'a> Tokenizer<'a> {
 	fn tokenize_number(&mut self) -> Result<Token, String> {
 		let mut word = String::new();
 
-		while let Some(c) = self.source.next_if(|c| c.is_ascii_digit()) {
+		while let Some(c) = self.next_char_if(|c| c.is_ascii_digit()) {
 			word.push(c);
 		}
 
 		let source = self.source.clone();
-		if let Some(true) = self.source.next_if_eq(&'.').and_then(|_| {
-			if let Some(c) = self.source.peek() {
+		if let Some(true) = self.next_char_if_eq('.').and_then(|_| {
+			if let Some(c) = self.peek_char() {
 				Some(c.is_ascii_digit())
 			} else {
 				Some(false)
 			}
 		}) {
 			word.push('.');
-			while let Some(c) = self.source.next_if(|c| c.is_ascii_digit()) {
+
+			while let Some(c) = self.next_char_if(|c| c.is_ascii_digit()) {
 				word.push(c);
 			}
 
 			Ok(Token::new(
 				TokenData::Num(word.parse().or_else(|err| Err(format!("{}", err)))?),
-				CodeLocation::new(0, 0, String::new()),
+				self.token_location.clone(),
 			))
 		} else {
 			self.source = source;
 			Ok(Token::new(
 				TokenData::Int(word.parse().or_else(|err| Err(format!("{}", err)))?),
-				CodeLocation::new(0, 0, String::new()),
+				self.token_location.clone(),
 			))
 		}
 	}
@@ -253,28 +302,18 @@ impl<'a> Tokenizer<'a> {
 	}
 
 	fn tokenize_punctuation(&mut self) -> Result<Token, String> {
-		match self.source.next().ok_or("self.source.next() failed!")? {
-			';' => Ok(Token::new(
-				TokenData::Semicolon,
-				CodeLocation::new(0, 0, String::new()),
+		let token_location = self.token_location.clone();
+		match self.next_char().ok_or("self.source.next() failed!")? {
+			';' => Ok(Token::new(TokenData::Semicolon, token_location)),
+			'+' => Ok(Token::new(TokenData::Plus, token_location)),
+			'-' => Ok(Token::new(TokenData::Dash, token_location)),
+			'*' => Ok(Token::new(TokenData::Star, token_location)),
+			'/' => Ok(Token::new(TokenData::Slash, token_location)),
+			c => Err(format!(
+				"{}: Unknown operator `{}`.",
+				self.current_location(),
+				c
 			)),
-			'+' => Ok(Token::new(
-				TokenData::Plus,
-				CodeLocation::new(0, 0, String::new()),
-			)),
-			'-' => Ok(Token::new(
-				TokenData::Dash,
-				CodeLocation::new(0, 0, String::new()),
-			)),
-			'*' => Ok(Token::new(
-				TokenData::Star,
-				CodeLocation::new(0, 0, String::new()),
-			)),
-			'/' => Ok(Token::new(
-				TokenData::Slash,
-				CodeLocation::new(0, 0, String::new()),
-			)),
-			c => Err(format!("Unknown operator `{}`.", c)),
 		}
 	}
 }
