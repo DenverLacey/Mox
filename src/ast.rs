@@ -1,6 +1,11 @@
 use crate::parser::CodeLocation;
 use crate::value::ObjID;
 
+// @NOTE:
+// How zig does AST stuff with indexes instead of pointers / convential tree structure
+// https://mitchellh.com/zig/parser
+//
+
 #[derive(Debug)]
 pub struct AST {
 	roots: Vec<usize>,
@@ -59,12 +64,34 @@ impl std::fmt::Display for AST {
 				Str => todo!(),
 				List => todo!(),
 
+				// Unary
+				Negate => fmt_unary_at_indent("-", me, node_index, indent, f),
+
 				// Binary
 				Add => fmt_binary_at_indent("+", me, node_index, indent, f),
 				Subtract => fmt_binary_at_indent("-", me, node_index, indent, f),
 				Multiply => fmt_binary_at_indent("*", me, node_index, indent, f),
 				Divide => fmt_binary_at_indent("/", me, node_index, indent, f),
+				Assign => fmt_binary_at_indent("=", me, node_index, indent, f),
 			}
+		}
+
+		fn fmt_unary_at_indent(
+			op: &str,
+			me: &AST,
+			node_index: usize,
+			indent: usize,
+			f: &mut std::fmt::Formatter<'_>,
+		) -> std::fmt::Result {
+			write!(f, "`{}` {{\n", op)?;
+			write!(
+				f,
+				"{: >indent$}{}",
+				"",
+				"sub: ",
+				indent = (indent + 1) * INDENT_SIZE
+			)?;
+			write!(f, "{: >indent$}}}\n", "", indent = indent * INDENT_SIZE)
 		}
 
 		fn fmt_binary_at_indent(
@@ -137,7 +164,7 @@ impl Node {
 	}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NodeKind {
 	// Literals
 	Bool,
@@ -146,9 +173,13 @@ pub enum NodeKind {
 	Str,
 	List,
 
+	// Unary
+	Negate,
+
 	// Binary
 	Add,
 	Subtract,
 	Multiply,
 	Divide,
+	Assign,
 }

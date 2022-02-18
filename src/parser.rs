@@ -18,7 +18,7 @@ impl CodeLocation {
 }
 
 impl Display for CodeLocation {
-	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(f, "{}:{}:{}", self.line + 1, self.col + 1, self.file)
 	}
 }
@@ -75,6 +75,29 @@ pub enum TokenData {
 	Slash,
 }
 
+impl Display for Token {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		use TokenData::*;
+		match &self.data {
+			// Literals
+			Bool(value) => write!(f, "{}", value),
+			Int(value) => write!(f, "{}", value),
+			Num(value) => write!(f, "{}", value),
+			Str(value) => write!(f, "{}", value),
+
+			// Delimeters
+			Newline => write!(f, "newline"),
+			Semicolon => write!(f, ";"),
+
+			// Operators
+			Plus => write!(f, "+"),
+			Dash => write!(f, "-"),
+			Star => write!(f, "*"),
+			Slash => write!(f, "/"),
+		}
+	}
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 enum TokenPrecedence {
 	None,
@@ -111,6 +134,7 @@ impl TokenPrecedence {
 pub struct Tokenizer<'a> {
 	source: Peekable<Chars<'a>>,
 	peeked_tokens: VecDeque<Token>,
+	previous_was_newline: bool,
 
 	line: usize,
 	coloumn: usize,
@@ -122,6 +146,7 @@ impl<'a> Tokenizer<'a> {
 		Self {
 			source,
 			peeked_tokens: VecDeque::new(),
+			previous_was_newline: true, // to skip leading newlines in source file
 			line: 0,
 			coloumn: 0,
 			token_location: CodeLocation::new(0, 0, "<TODO>".to_string()),
@@ -213,11 +238,13 @@ impl<'a> Tokenizer<'a> {
 	fn next_no_peeking(&mut self) -> Result<Option<Token>, String> {
 		self.skip_to_begining_of_next_token();
 		self.record_token_location();
+		self.previous_was_newline = false;
 
 		if let Some(&c) = self.peek_char() {
 			if c == '\0' {
 				Ok(None)
 			} else if c == '\n' {
+				self.previous_was_newline = true;
 				self.next_char().expect("We've already peeked this");
 				Ok(Some(Token::new(
 					TokenData::Newline,
@@ -250,6 +277,10 @@ impl<'a> Tokenizer<'a> {
 						self.coloumn = 0;
 					}
 					'\n' => {
+						if !self.previous_was_newline {
+							break;
+						}
+
 						self.source.next().expect("We already checked for `None`.");
 						self.line += 1;
 						self.coloumn = 0;
@@ -376,9 +407,11 @@ impl<'a> Parser<'a> {
 	fn parse_expression(&mut self) -> Result<usize, String> {
 		let idx = self.parse_expression_or_assignment()?;
 
-		todo!("Check not assignment");
-
-		// idx
+		if self.ast.get(idx).kind == NodeKind::Assign {
+			Err("Cannot assign in expression context!".to_string())
+		} else {
+			Ok(idx)
+		}
 	}
 
 	fn parse_precedence(&mut self, precedence: TokenPrecedence) -> Result<usize, String> {
@@ -391,7 +424,10 @@ impl<'a> Parser<'a> {
 				.ok_or("Unexpected end of file!")?
 				.precedence()
 		{
-			let token = self.tokenizer.next()?.ok_or("Unexpected end of file!")?;
+			let token = self
+				.tokenizer
+				.next()?
+				.expect("We already checked in the condition of while");
 			previous = self.parse_infix(token, previous)?;
 		}
 
@@ -401,11 +437,27 @@ impl<'a> Parser<'a> {
 	fn parse_prefix(&mut self, token: Token) -> Result<usize, String> {
 		use TokenData::*;
 		match token.data {
+			// Literals
 			Bool(value) => Ok(self.ast.add_node(Node::new_bool(value), token.location)),
 			Int(value) => Ok(self.ast.add_node(Node::new_int(value), token.location)),
 			Num(value) => Ok(self.ast.add_node(Node::new_num(value), token.location)),
 			Str(_value) => todo!(),
-			_ => Err(format!("`{:?}` is not a prefix operation!", token)),
+
+			// Operators
+			Dash => {
+				let next = self.tokenizer.peek()?.ok_or("Unexpected end of input!")?;
+				if let TokenData::Int(value) = next.data {
+					self.tokenizer.next().expect("We just peeked this");
+					Ok(self.ast.add_node(Node::new_int(-value), token.location))
+				} else if let TokenData::Num(value) = next.data {
+					self.tokenizer.next().expect("We just peeked this");
+					Ok(self.ast.add_node(Node::new_num(-value), token.location))
+				} else {
+					self.parse_unary(NodeKind::Negate, token.location)
+				}
+			}
+
+			_ => Err(format!("`{}` is not a prefix operation!", token)),
 		}
 	}
 
@@ -431,8 +483,13 @@ impl<'a> Parser<'a> {
 				previous,
 				token.location,
 			),
-			_ => Err(format!("`{:?}` is not an infix operation!", token)),
+			_ => Err(format!("`{}` is not an infix operation!", token)),
 		}
+	}
+
+	fn parse_unary(&mut self, kind: NodeKind, location: CodeLocation) -> Result<usize, String> {
+		let sub = self.parse_precedence(TokenPrecedence::Unary)?;
+		Ok(self.ast.add_node(Node::new(kind, sub, 0), location))
 	}
 
 	fn parse_binary(
