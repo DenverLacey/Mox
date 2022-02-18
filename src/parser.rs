@@ -1,4 +1,5 @@
 use crate::ast::{Node, NodeKind, AST};
+use crate::error::*;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::iter::Peekable;
@@ -46,6 +47,8 @@ impl Token {
 			// Delimeters
 			Newline => TokenPrecedence::None,
 			Semicolon => TokenPrecedence::None,
+			LeftParen => TokenPrecedence::Call,
+			RightParen => TokenPrecedence::None,
 
 			// Operators
 			Plus => TokenPrecedence::Term,
@@ -53,6 +56,12 @@ impl Token {
 			Star => TokenPrecedence::Factor,
 			Slash => TokenPrecedence::Factor,
 		}
+	}
+}
+
+impl Display for Token {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.data)
 	}
 }
 
@@ -67,6 +76,8 @@ pub enum TokenData {
 	// Delimeters
 	Newline,
 	Semicolon,
+	LeftParen,
+	RightParen,
 
 	// Operators
 	Plus,
@@ -75,10 +86,34 @@ pub enum TokenData {
 	Slash,
 }
 
-impl Display for Token {
+impl TokenData {
+	const fn tag(&self) -> u8 {
+		use TokenData::*;
+		match self {
+			Bool(_) => 0,
+			Int(_) => 1,
+			Num(_) => 2,
+			Str(_) => 3,
+			Newline => 4,
+			Semicolon => 5,
+			LeftParen => 6,
+			RightParen => 7,
+			Plus => 8,
+			Dash => 9,
+			Star => 10,
+			Slash => 11,
+		}
+	}
+
+	fn eq_kind(&self, other: &Self) -> bool {
+		self.tag() == other.tag()
+	}
+}
+
+impl Display for TokenData {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		use TokenData::*;
-		match &self.data {
+		match self {
 			// Literals
 			Bool(value) => write!(f, "{}", value),
 			Int(value) => write!(f, "{}", value),
@@ -88,6 +123,8 @@ impl Display for Token {
 			// Delimeters
 			Newline => write!(f, "newline"),
 			Semicolon => write!(f, ";"),
+			LeftParen => write!(f, "("),
+			RightParen => write!(f, ")"),
 
 			// Operators
 			Plus => write!(f, "+"),
@@ -198,7 +235,7 @@ impl<'a> Tokenizer<'a> {
 		maybe_next_char
 	}
 
-	pub fn peek(&mut self) -> Result<Option<&Token>, String> {
+	pub fn peek(&mut self) -> Result<Option<&Token>> {
 		if self.peeked_tokens.is_empty() {
 			let t = self.next()?;
 			if let Some(t) = t {
@@ -210,7 +247,7 @@ impl<'a> Tokenizer<'a> {
 		Ok(self.peeked_tokens.front())
 	}
 
-	pub fn peek_n(&mut self, n: usize) -> Result<Option<&Token>, String> {
+	pub fn peek_n(&mut self, n: usize) -> Result<Option<&Token>> {
 		while self.peeked_tokens.len() <= n {
 			if let Some(t) = self.next_no_peeking()? {
 				self.peeked_tokens.push_back(t);
@@ -221,14 +258,14 @@ impl<'a> Tokenizer<'a> {
 		Ok(Some(&self.peeked_tokens[n]))
 	}
 
-	pub fn next(&mut self) -> Result<Option<Token>, String> {
+	pub fn next(&mut self) -> Result<Option<Token>> {
 		if !self.peeked_tokens.is_empty() {
 			return Ok(self.peeked_tokens.pop_front());
 		}
 		self.next_no_peeking()
 	}
 
-	fn next_no_peeking(&mut self) -> Result<Option<Token>, String> {
+	fn next_no_peeking(&mut self) -> Result<Option<Token>> {
 		self.skip_to_begining_of_next_token();
 		self.record_token_location();
 		self.previous_was_newline = false;
@@ -287,7 +324,7 @@ impl<'a> Tokenizer<'a> {
 		}
 	}
 
-	fn tokenize_number(&mut self) -> Result<Token, String> {
+	fn tokenize_number(&mut self) -> Result<Token> {
 		let mut word = String::new();
 
 		while let Some(c) = self.next_char_if(|c| c.is_ascii_digit()) {
@@ -309,13 +346,21 @@ impl<'a> Tokenizer<'a> {
 			}
 
 			Ok(Token::new(
-				TokenData::Num(word.parse().or_else(|err| Err(format!("{}", err)))?),
+				TokenData::Num(
+					word
+						.parse()
+						.or_else(|err| ErrAt(self.token_location.clone(), format!("{}", err)))?,
+				),
 				self.token_location.clone(),
 			))
 		} else {
 			self.source = source;
 			Ok(Token::new(
-				TokenData::Int(word.parse().or_else(|err| Err(format!("{}", err)))?),
+				TokenData::Int(
+					word
+						.parse()
+						.or_else(|err| ErrAt(self.token_location.clone(), format!("{}", err)))?,
+				),
 				self.token_location.clone(),
 			))
 		}
@@ -325,19 +370,20 @@ impl<'a> Tokenizer<'a> {
 		todo!()
 	}
 
-	fn tokenize_punctuation(&mut self) -> Result<Token, String> {
+	fn tokenize_punctuation(&mut self) -> Result<Token> {
 		let token_location = self.token_location.clone();
-		match self.next_char().ok_or("self.source.next() failed!")? {
+		match self.next_char().ok_or(Error::SimpleErrAt(
+			token_location.clone(),
+			"self.source.next() failed!",
+		))? {
 			';' => Ok(Token::new(TokenData::Semicolon, token_location)),
+			'(' => Ok(Token::new(TokenData::LeftParen, token_location)),
+			')' => Ok(Token::new(TokenData::RightParen, token_location)),
 			'+' => Ok(Token::new(TokenData::Plus, token_location)),
 			'-' => Ok(Token::new(TokenData::Dash, token_location)),
 			'*' => Ok(Token::new(TokenData::Star, token_location)),
 			'/' => Ok(Token::new(TokenData::Slash, token_location)),
-			c => Err(format!(
-				"{}: Unknown operator `{}`.",
-				self.current_location(),
-				c
-			)),
+			c => ErrAt(token_location, format!("Unknown operator `{}`.", c)),
 		}
 	}
 }
@@ -354,8 +400,22 @@ impl<'a> Parser<'a> {
 			tokenizer: Tokenizer::new(source, filename),
 		}
 	}
+}
 
-	fn expect_statement_terminator(&mut self, err: impl Into<String>) -> Result<Token, String> {
+impl<'a> Parser<'a> {
+	fn expect(&mut self, data_kind: &TokenData, err: impl Into<String>) -> Result<Token> {
+		let next = self
+			.tokenizer
+			.next()?
+			.ok_or(Error::SimpleErr("Unexpected end of file!"))?;
+		if !next.data.eq_kind(data_kind) {
+			ErrAt(next.location, err.into())
+		} else {
+			Ok(next)
+		}
+	}
+
+	fn expect_statement_terminator(&mut self, err: impl Into<String>) -> Result<Token> {
 		let token = self.tokenizer.next()?;
 
 		use TokenData::*;
@@ -369,13 +429,11 @@ impl<'a> Parser<'a> {
 				data: Semicolon,
 				location: _,
 			}) => Ok(token.unwrap()),
-			_ => Err(err.into()),
+			Some(t) => ErrAt(t.location, err.into()),
 		}
 	}
-}
 
-impl<'a> Parser<'a> {
-	fn parse_declaration(&mut self) -> Result<usize, String> {
+	fn parse_declaration(&mut self) -> Result<usize> {
 		if false {
 			todo!("THis is where declaration parsing functions will go.");
 		} else {
@@ -383,7 +441,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn parse_statement(&mut self) -> Result<usize, String> {
+	fn parse_statement(&mut self) -> Result<usize> {
 		if false {
 			todo!("This is where statement parsing functions will go.");
 		} else {
@@ -393,28 +451,31 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn parse_expression_or_assignment(&mut self) -> Result<usize, String> {
+	fn parse_expression_or_assignment(&mut self) -> Result<usize> {
 		self.parse_precedence(TokenPrecedence::Assignment)
 	}
 
-	fn parse_expression(&mut self) -> Result<usize, String> {
+	fn parse_expression(&mut self) -> Result<usize> {
 		let idx = self.parse_expression_or_assignment()?;
 
 		if self.ast.get(idx).kind == NodeKind::Assign {
-			Err("Cannot assign in expression context!".to_string())
+			SimpleErr("Cannot assign in expression context!")
 		} else {
 			Ok(idx)
 		}
 	}
 
-	fn parse_precedence(&mut self, precedence: TokenPrecedence) -> Result<usize, String> {
-		let token = self.tokenizer.next()?.ok_or("Unexpected end of file!")?;
+	fn parse_precedence(&mut self, precedence: TokenPrecedence) -> Result<usize> {
+		let token = self
+			.tokenizer
+			.next()?
+			.ok_or(Error::SimpleErr("Unexpected end of file!"))?;
 		let mut previous = self.parse_prefix(token)?;
 		while precedence
 			<= self
 				.tokenizer
 				.peek()?
-				.ok_or("Unexpected end of file!")?
+				.ok_or(Error::SimpleErr("Unexpected end of file!"))?
 				.precedence()
 		{
 			let token = self
@@ -427,7 +488,7 @@ impl<'a> Parser<'a> {
 		Ok(previous)
 	}
 
-	fn parse_prefix(&mut self, token: Token) -> Result<usize, String> {
+	fn parse_prefix(&mut self, token: Token) -> Result<usize> {
 		use TokenData::*;
 		match token.data {
 			// Literals
@@ -436,9 +497,25 @@ impl<'a> Parser<'a> {
 			Num(value) => Ok(self.ast.add_node(Node::new_num(value), token.location)),
 			Str(_value) => todo!(),
 
+			// Delimeters
+			LeftParen => {
+				let idx = self.parse_expression()?;
+				self.expect(
+					&TokenData::RightParen,
+					format!(
+						"Expected `{}` to terminate parenthesised expression.",
+						TokenData::RightParen
+					),
+				)?;
+				Ok(idx)
+			}
+
 			// Operators
 			Dash => {
-				let next = self.tokenizer.peek()?.ok_or("Unexpected end of input!")?;
+				let next = self
+					.tokenizer
+					.peek()?
+					.ok_or(Error::SimpleErr("Unexpected end of input!"))?;
 				if let TokenData::Int(value) = next.data {
 					self.tokenizer.next().expect("We just peeked this");
 					Ok(self.ast.add_node(Node::new_int(-value), token.location))
@@ -450,11 +527,14 @@ impl<'a> Parser<'a> {
 				}
 			}
 
-			_ => Err(format!("`{}` is not a prefix operation!", token)),
+			_ => ErrAt(
+				token.location.clone(),
+				format!("`{}` is not a prefix operation!", token),
+			),
 		}
 	}
 
-	fn parse_infix(&mut self, token: Token, previous: usize) -> Result<usize, String> {
+	fn parse_infix(&mut self, token: Token, previous: usize) -> Result<usize> {
 		use TokenData::*;
 		match token.data {
 			Plus => self.parse_binary(token.precedence(), NodeKind::Add, previous, token.location),
@@ -476,11 +556,14 @@ impl<'a> Parser<'a> {
 				previous,
 				token.location,
 			),
-			_ => Err(format!("`{}` is not an infix operation!", token)),
+			_ => ErrAt(
+				token.location.clone(),
+				format!("`{}` is not an infix operation!", token),
+			),
 		}
 	}
 
-	fn parse_unary(&mut self, kind: NodeKind, location: CodeLocation) -> Result<usize, String> {
+	fn parse_unary(&mut self, kind: NodeKind, location: CodeLocation) -> Result<usize> {
 		let sub = self.parse_precedence(TokenPrecedence::Unary)?;
 		Ok(self.ast.add_node(Node::new(kind, sub, 0), location))
 	}
@@ -491,14 +574,14 @@ impl<'a> Parser<'a> {
 		kind: NodeKind,
 		lhs: usize,
 		location: CodeLocation,
-	) -> Result<usize, String> {
+	) -> Result<usize> {
 		let precedence = precedence.next();
 		let rhs = self.parse_precedence(precedence)?;
 		Ok(self.ast.add_node(Node::new(kind, lhs, rhs), location))
 	}
 }
 
-pub fn parse<'a>(source: Peekable<Chars<'a>>, filename: String) -> Result<AST, String> {
+pub fn parse<'a>(source: Peekable<Chars<'a>>, filename: String) -> Result<AST> {
 	let mut p = Parser::new(source, filename);
 	while p.tokenizer.peek()?.is_some() {
 		let root = p.parse_declaration()?;

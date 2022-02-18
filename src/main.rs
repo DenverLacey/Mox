@@ -1,4 +1,5 @@
 mod ast;
+mod error;
 mod parser;
 mod value;
 
@@ -10,15 +11,15 @@ fn main() {
 	println!("sizeof(Value) = {}", std::mem::size_of::<value::Value>());
 
 	if let Err(err) = execute() {
-		eprintln!("Error: {}", err);
+		eprintln!("{}", err);
 	}
 }
 
-fn execute() -> Result<(), String> {
+fn execute() -> error::Result<()> {
 	let source = r#"
 	# this is a comment
 	
-	15 - -3 / 44
+	3 * (4 + 1)
 
 	# this is another comment
 
