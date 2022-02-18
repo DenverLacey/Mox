@@ -133,6 +133,7 @@ impl TokenPrecedence {
 #[derive(Debug)]
 pub struct Tokenizer<'a> {
 	source: Peekable<Chars<'a>>,
+	filename: String,
 	peeked_tokens: VecDeque<Token>,
 	previous_was_newline: bool,
 
@@ -142,14 +143,16 @@ pub struct Tokenizer<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
-	pub fn new(source: Peekable<Chars<'a>>) -> Self {
+	pub fn new(source: Peekable<Chars<'a>>, filename: String) -> Self {
+		let token_location_filename = filename.clone();
 		Self {
 			source,
+			filename,
 			peeked_tokens: VecDeque::new(),
 			previous_was_newline: true, // to skip leading newlines in source file
 			line: 0,
 			coloumn: 0,
-			token_location: CodeLocation::new(0, 0, "<TODO>".to_string()),
+			token_location: CodeLocation::new(0, 0, token_location_filename),
 		}
 	}
 
@@ -159,7 +162,7 @@ impl<'a> Tokenizer<'a> {
 	}
 
 	fn current_location(&self) -> CodeLocation {
-		CodeLocation::new(self.line, self.coloumn, "<TODO>".to_string())
+		CodeLocation::new(self.line, self.coloumn, self.filename.clone())
 	}
 }
 
@@ -204,18 +207,12 @@ impl<'a> Tokenizer<'a> {
 				return Ok(None);
 			}
 		}
-		Ok(Some(
-			self
-				.peeked_tokens
-				.front()
-				.expect("We checked for empty vec."),
-		))
+		Ok(self.peeked_tokens.front())
 	}
 
 	pub fn peek_n(&mut self, n: usize) -> Result<Option<&Token>, String> {
 		while self.peeked_tokens.len() <= n {
-			let t = self.next_no_peeking()?;
-			if let Some(t) = t {
+			if let Some(t) = self.next_no_peeking()? {
 				self.peeked_tokens.push_back(t);
 			} else {
 				return Ok(None);
@@ -226,11 +223,7 @@ impl<'a> Tokenizer<'a> {
 
 	pub fn next(&mut self) -> Result<Option<Token>, String> {
 		if !self.peeked_tokens.is_empty() {
-			let t = self
-				.peeked_tokens
-				.pop_front()
-				.expect("Already checked for empty vec.");
-			return Ok(Some(t));
+			return Ok(self.peeked_tokens.pop_front());
 		}
 		self.next_no_peeking()
 	}
@@ -355,10 +348,10 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-	pub fn new(source: Peekable<Chars<'a>>) -> Self {
+	pub fn new(source: Peekable<Chars<'a>>, filename: String) -> Self {
 		Self {
 			ast: AST::new(),
-			tokenizer: Tokenizer::new(source),
+			tokenizer: Tokenizer::new(source, filename),
 		}
 	}
 
@@ -505,8 +498,8 @@ impl<'a> Parser<'a> {
 	}
 }
 
-pub fn parse<'a>(source: Peekable<Chars<'a>>, filename: Option<String>) -> Result<AST, String> {
-	let mut p = Parser::new(source);
+pub fn parse<'a>(source: Peekable<Chars<'a>>, filename: String) -> Result<AST, String> {
+	let mut p = Parser::new(source, filename);
 	while p.tokenizer.peek()?.is_some() {
 		let root = p.parse_declaration()?;
 		p.ast.add_root(root);

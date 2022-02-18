@@ -24,7 +24,7 @@ fn execute() -> Result<(), String> {
 
 	"#;
 
-	let ast = parse(source.chars().peekable(), Some("<TODO>".to_string()))?;
+	let ast = parse(source.chars().peekable(), "<SOURCE>".to_string())?;
 	println!("{}", ast);
 
 	Ok(())
