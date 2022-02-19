@@ -72,7 +72,7 @@ impl AST {
 
 	pub fn get_extra_data<E>(&self, index: usize) -> E
 	where
-		E: ExtraData,
+		E: ExtraData + Default + Sized,
 	{
 		let slice = self
 			.extra_data
@@ -313,32 +313,36 @@ impl NodeBlock {
 	}
 }
 
-pub trait ExtraData {
-	fn len() -> usize;
-	fn from(slice: &[usize]) -> Self;
+pub trait ExtraData
+where
+	Self: Sized + Default,
+{
+	fn len() -> usize {
+		std::mem::size_of::<Self>() / std::mem::size_of::<usize>()
+	}
+
+	fn from(slice: &[usize]) -> Self {
+		assert_eq!(slice.len(), Self::len());
+		let mut s = Self::default();
+		s.as_slice_mut().copy_from_slice(slice);
+		s
+	}
 
 	fn as_slice(&self) -> &[usize] {
 		unsafe { std::slice::from_raw_parts(self as *const Self as *const usize, Self::len()) }
 	}
+
+	fn as_slice_mut(&mut self) -> &mut [usize] {
+		unsafe { std::slice::from_raw_parts_mut(self as *mut Self as *mut usize, Self::len()) }
+	}
 }
 
+impl ExtraData for ExtraDataIf {}
+
 #[repr(C)] // We need repr(C) to guarentee fields are in the expencted places
+#[derive(Default)]
 pub struct ExtraDataIf {
 	pub condition: usize,
 	pub then_block: usize,
 	pub else_block: usize, // 0 means no else_block
-}
-
-impl ExtraData for ExtraDataIf {
-	fn len() -> usize {
-		3
-	}
-
-	fn from(slice: &[usize]) -> Self {
-		ExtraDataIf {
-			condition: slice[0],
-			then_block: slice[1],
-			else_block: slice[2],
-		}
-	}
 }
