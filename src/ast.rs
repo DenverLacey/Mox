@@ -98,12 +98,12 @@ impl std::fmt::Display for AST {
 			use NodeKind::*;
 			match node.kind {
 				// Literals
-				Bool => write!(f, "Bool({})\n", node.lhs != 0),
-				Int => write!(f, "Int({})\n", node.lhs as i64),
-				Num => write!(f, "Num({})\n", unsafe {
+				Bool => write!(f, "{:?}\n", node.lhs != 0),
+				Int => write!(f, "{:?}\n", node.lhs as i64),
+				Num => write!(f, "{:?}\n", unsafe {
 					std::mem::transmute::<usize, f64>(node.lhs)
 				}),
-				Str => todo!(),
+				Str => write!(f, "{:?}\n", me.strings[node.lhs]),
 				Ident => write!(f, "Ident({})\n", me.strings[node.lhs]),
 				List => todo!(),
 
@@ -359,12 +359,16 @@ where
 	}
 }
 
-impl ExtraData for ExtraDataIf {}
+macro_rules! impl_extra_data {
+	($id:ident; $($field_names:ident),*) => {
+		#[repr(C)]
+		#[derive(Default)]
+		pub struct $id {
+			$(pub $field_names: usize),*
+		}
 
-#[repr(C)] // We need repr(C) to guarentee fields are in the expencted places
-#[derive(Default)]
-pub struct ExtraDataIf {
-	pub condition: usize,
-	pub then_block: usize,
-	pub else_block: usize, // 0 means no else_block
+		impl ExtraData for $id {}
+	};
 }
+
+impl_extra_data!(ExtraDataIf; condition, then_block, else_block);

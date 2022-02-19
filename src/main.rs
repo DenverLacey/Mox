@@ -29,6 +29,8 @@ fn execute() -> error::Result<()> {
 			69240
 		}
 
+		"\tHellothere!\nI love you"
+
 		# this is another comment
 
 		"#;

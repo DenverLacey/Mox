@@ -1,4 +1,4 @@
-use crate::ast::{self, Node, NodeKind, AST};
+use crate::ast::*;
 use crate::error::*;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
@@ -322,6 +322,8 @@ impl<'a> Tokenizer<'a> {
 				)))
 			} else if c.is_ascii_digit() {
 				Ok(Some(self.tokenize_number()?))
+			} else if c == '"' || c == '\'' {
+				Ok(Some(self.tokenize_string()?))
 			} else if Self::is_ident_begin(&c) {
 				Ok(Some(self.tokenize_identifier_or_keyword()))
 			} else {
@@ -404,6 +406,47 @@ impl<'a> Tokenizer<'a> {
 				self.token_location.clone(),
 			))
 		}
+	}
+
+	fn tokenize_string(&mut self) -> Result<Token> {
+		let terminator = self
+			.next_char()
+			.expect("We should have peeked in the outer loop");
+
+		let mut word = String::new();
+
+		loop {
+			match self.next_char() {
+				None => return SimpleErrAt(self.token_location.clone(), "Unended string literal!"),
+				Some('\\') => match self.next_char() {
+					None => return SimpleErrAt(self.token_location.clone(), "Unended string literal!"),
+					Some('0') => word.push('\0'),
+					Some('e') => todo!(),
+					Some('n') => word.push('\n'),
+					Some('t') => word.push('\t'),
+					Some('u') => todo!(),
+					Some('U') => todo!(),
+					Some('x') => todo!(),
+					Some('X') => todo!(),
+					Some('\\') => word.push('\\'),
+					Some('"') => word.push('"'),
+					Some('\'') => word.push('\''),
+					Some(c) => {
+						return ErrAt(
+							self.current_location(),
+							format!("`\\{}` is not a valid escape sequence", c),
+						)
+					}
+				},
+				Some(c) if c == terminator => break,
+				Some(c) => word.push(c),
+			}
+		}
+
+		Ok(Token::new(
+			TokenData::Str(word),
+			self.token_location.clone(),
+		))
 	}
 
 	fn tokenize_identifier_or_keyword(&mut self) -> Token {
@@ -539,7 +582,6 @@ impl<'a> Parser<'a> {
 			.tokenizer
 			.next()?
 			.ok_or(Error::SimpleErr("Unexpected end of file!"))?;
-		println!("\texpect: next = {:?}", next);
 		if !next.data.eq_kind(data_kind) {
 			ErrAt(next.location, err.into())
 		} else {
@@ -616,8 +658,6 @@ impl<'a> Parser<'a> {
 	}
 
 	fn flush_peeked_newlines(&mut self) {
-		println!("Before Flush:\n\t{:?}", self.tokenizer.peeked_tokens);
-
 		while let Some(Token {
 			data: TokenData::Newline,
 			location: _,
@@ -629,8 +669,6 @@ impl<'a> Parser<'a> {
 				.pop_front()
 				.expect("We checked the front for `None`");
 		}
-
-		println!("After Flush:\n\t{:?}", self.tokenizer.peeked_tokens);
 	}
 }
 
@@ -796,7 +834,6 @@ impl<'a> Parser<'a> {
 	fn parse_block(&mut self, kind: NodeKind) -> Result<usize> {
 		let mut roots = Vec::new();
 
-		println!("parse_block");
 		let block_location = self
 			.skip_expect(
 				&TokenData::LeftCurly,
@@ -817,12 +854,11 @@ impl<'a> Parser<'a> {
 			format!("Expected `{}` to terminate block.", TokenData::RightCurly),
 		)?;
 
-		let block = self.ast.add_block(ast::NodeBlock::new(kind, roots));
+		let block = self.ast.add_block(NodeBlock::new(kind, roots));
 		Ok(self.ast.add_node(Node::new(kind, block, 0), block_location))
 	}
 
 	fn parse_if(&mut self, token: Token) -> Result<usize> {
-		println!("ENTER `parse_if`");
 		let if_location = token.location;
 
 		self.skip_newlines()?;
@@ -844,13 +880,11 @@ impl<'a> Parser<'a> {
 			0
 		};
 
-		let if_data = self.ast.add_extra_data(ast::ExtraDataIf {
+		let if_data = self.ast.add_extra_data(ExtraDataIf {
 			condition,
 			then_block,
 			else_block,
 		});
-
-		println!("EXIT `parse_if`");
 
 		Ok(
 			self
@@ -860,15 +894,11 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_while(&mut self, token: Token) -> Result<usize> {
-		println!("ENTER `parse_while`");
-
 		let while_location = token.location;
 
 		self.skip_newlines()?;
 		let condition = self.parse_expression()?;
 		let body = self.parse_block(NodeKind::Block)?;
-
-		println!("EXIT `parse_while`");
 
 		Ok(
 			self
