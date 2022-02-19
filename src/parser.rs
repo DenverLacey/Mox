@@ -62,6 +62,7 @@ impl Token {
 			// Keywords
 			If => TokenPrecedence::None,
 			Else => TokenPrecedence::None,
+			While => TokenPrecedence::None,
 		}
 	}
 }
@@ -98,6 +99,7 @@ pub enum TokenData {
 	// Keywords
 	If,
 	Else,
+	While,
 }
 
 impl TokenData {
@@ -121,6 +123,7 @@ impl TokenData {
 			Slash => 14,
 			If => 15,
 			Else => 16,
+			While => 17,
 		}
 	}
 
@@ -157,6 +160,7 @@ impl Display for TokenData {
 			// Keywords
 			If => write!(f, "if"),
 			Else => write!(f, "else"),
+			While => write!(f, "while"),
 		}
 	}
 }
@@ -411,6 +415,7 @@ impl<'a> Tokenizer<'a> {
 		match word.as_str() {
 			"if" => Token::new(TokenData::If, self.token_location.clone()),
 			"else" => Token::new(TokenData::Else, self.token_location.clone()),
+			"while" => Token::new(TokenData::While, self.token_location.clone()),
 			_ => Token::new(TokenData::Ident(word), self.token_location.clone()),
 		}
 	}
@@ -459,19 +464,6 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn check_eof(&mut self) -> Result<bool> {
-		Ok(self.tokenizer.peek()?.is_none())
-	}
-
-	fn check_and_consume(&mut self, data_kind: &TokenData) -> Result<bool> {
-		if self.check(data_kind)? {
-			self.tokenizer.next().expect("We peek in check");
-			Ok(true)
-		} else {
-			Ok(false)
-		}
-	}
-
 	fn skip_check(&mut self, data_kind: &TokenData) -> Result<bool> {
 		self.skip_newlines()?;
 
@@ -483,9 +475,36 @@ impl<'a> Parser<'a> {
 		}
 	}
 
+	fn peek_check(&mut self, data_kind: &TokenData) -> Result<bool> {
+		let i = self.peek_newlines()?;
+		if let Some(t) = self.tokenizer.peek_n(i)? {
+			Ok(data_kind.eq_kind(&t.data))
+		} else {
+			Ok(false)
+		}
+	}
+
+	fn check_eof(&mut self) -> Result<bool> {
+		Ok(self.tokenizer.peek()?.is_none())
+	}
+
 	fn skip_check_eof(&mut self) -> Result<bool> {
 		self.skip_newlines()?;
 		Ok(self.tokenizer.peek()?.is_none())
+	}
+
+	fn peek_check_eof(&mut self) -> Result<bool> {
+		let i = self.peek_newlines()?;
+		Ok(self.tokenizer.peek_n(i)?.is_none())
+	}
+
+	fn check_and_consume(&mut self, data_kind: &TokenData) -> Result<bool> {
+		if self.check(data_kind)? {
+			self.tokenizer.next().expect("We peek in check");
+			Ok(true)
+		} else {
+			Ok(false)
+		}
 	}
 
 	fn skip_check_and_consume(&mut self, data_kind: &TokenData) -> Result<bool> {
@@ -499,11 +518,28 @@ impl<'a> Parser<'a> {
 		}
 	}
 
+	fn peek_check_and_consume(&mut self, data_kind: &TokenData) -> Result<bool> {
+		let i = self.peek_newlines()?;
+		if let Some(t) = self.tokenizer.peek_n(i)? {
+			if data_kind.eq_kind(&t.data) {
+				self.flush_peeked_newlines();
+				self
+					.tokenizer
+					.next()
+					.expect("We already peeked")
+					.expect("We already peeked");
+				return Ok(true);
+			}
+		}
+		return Ok(false);
+	}
+
 	fn expect(&mut self, data_kind: &TokenData, err: impl Into<String>) -> Result<Token> {
 		let next = self
 			.tokenizer
 			.next()?
 			.ok_or(Error::SimpleErr("Unexpected end of file!"))?;
+		println!("\texpect: next = {:?}", next);
 		if !next.data.eq_kind(data_kind) {
 			ErrAt(next.location, err.into())
 		} else {
@@ -514,6 +550,26 @@ impl<'a> Parser<'a> {
 	fn skip_expect(&mut self, data_kind: &TokenData, err: impl Into<String>) -> Result<Token> {
 		self.skip_newlines()?;
 		self.expect(data_kind, err)
+	}
+
+	fn peek_expect(&mut self, data_kind: &TokenData, err: impl Into<String>) -> Result<Token> {
+		let i = self.peek_newlines()?;
+		if let Some(t) = self.tokenizer.peek_n(i)? {
+			if t.data.eq_kind(data_kind) {
+				ErrAt(t.location.clone(), err.into())
+			} else {
+				self.flush_peeked_newlines();
+				Ok(
+					self
+						.tokenizer
+						.next()
+						.expect("We already peeked")
+						.expect("We already peeked"),
+				)
+			}
+		} else {
+			Err(err.into())
+		}
 	}
 
 	fn expect_statement_terminator(&mut self, err: impl Into<String>) -> Result<Token> {
@@ -546,6 +602,39 @@ impl<'a> Parser<'a> {
 		Ok(())
 	}
 
+	fn peek_newlines(&mut self) -> Result<usize> {
+		let mut i = 0;
+		while let Some(Token {
+			data: TokenData::Newline,
+			location: _,
+		}) = self.tokenizer.peek_n(i)?
+		{
+			i += 1;
+		}
+
+		Ok(i)
+	}
+
+	fn flush_peeked_newlines(&mut self) {
+		println!("Before Flush:\n\t{:?}", self.tokenizer.peeked_tokens);
+
+		while let Some(Token {
+			data: TokenData::Newline,
+			location: _,
+		}) = self.tokenizer.peeked_tokens.front()
+		{
+			self
+				.tokenizer
+				.peeked_tokens
+				.pop_front()
+				.expect("We checked the front for `None`");
+		}
+
+		println!("After Flush:\n\t{:?}", self.tokenizer.peeked_tokens);
+	}
+}
+
+impl<'a> Parser<'a> {
 	fn parse_declaration(&mut self) -> Result<usize> {
 		if false {
 			todo!("THis is where declaration parsing functions will go.");
@@ -649,6 +738,7 @@ impl<'a> Parser<'a> {
 
 			// Keywords
 			If => self.parse_if(token),
+			While => self.parse_while(token),
 
 			_ => ErrAt(
 				token.location.clone(),
@@ -706,6 +796,7 @@ impl<'a> Parser<'a> {
 	fn parse_block(&mut self, kind: NodeKind) -> Result<usize> {
 		let mut roots = Vec::new();
 
+		println!("parse_block");
 		let block_location = self
 			.skip_expect(
 				&TokenData::LeftCurly,
@@ -731,15 +822,24 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_if(&mut self, token: Token) -> Result<usize> {
+		println!("ENTER `parse_if`");
 		let if_location = token.location;
 
 		self.skip_newlines()?;
 		let condition = self.parse_expression()?;
 
 		let then_block = self.parse_block(NodeKind::Block)?;
-		let else_block = if self.skip_check_and_consume(&TokenData::Else)? {
-			// @TODO: Handle else if
-			self.parse_block(NodeKind::Block)?
+		let else_block = if self.peek_check_and_consume(&TokenData::Else)? {
+			if self.skip_check(&TokenData::If)? {
+				let if_token = self
+					.tokenizer
+					.next()
+					.expect("Peeked by `skip_check`")
+					.expect("Peeked by `skip_check`");
+				self.parse_if(if_token)?
+			} else {
+				self.parse_block(NodeKind::Block)?
+			}
 		} else {
 			0
 		};
@@ -749,10 +849,31 @@ impl<'a> Parser<'a> {
 			then_block,
 			else_block,
 		});
+
+		println!("EXIT `parse_if`");
+
 		Ok(
 			self
 				.ast
 				.add_node(Node::new(NodeKind::If, if_data, 0), if_location),
+		)
+	}
+
+	fn parse_while(&mut self, token: Token) -> Result<usize> {
+		println!("ENTER `parse_while`");
+
+		let while_location = token.location;
+
+		self.skip_newlines()?;
+		let condition = self.parse_expression()?;
+		let body = self.parse_block(NodeKind::Block)?;
+
+		println!("EXIT `parse_while`");
+
+		Ok(
+			self
+				.ast
+				.add_node(Node::new(NodeKind::While, condition, body), while_location),
 		)
 	}
 }

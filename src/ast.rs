@@ -154,6 +154,27 @@ impl std::fmt::Display for AST {
 
 					write!(f, "{: >indent$}}}\n", "", indent = indent * INDENT_SIZE)
 				}
+				While => {
+					write!(f, "`while` {{\n")?;
+
+					write!(
+						f,
+						"{: >indent$}condition: ",
+						"",
+						indent = (indent + 1) * INDENT_SIZE
+					)?;
+					fmt_at_indent(me, node.lhs, indent + 1, f)?;
+
+					write!(
+						f,
+						"{: >indent$}body: ",
+						"",
+						indent = (indent + 1) * INDENT_SIZE
+					)?;
+					fmt_at_indent(me, node.rhs, indent + 1, f)?;
+
+					write!(f, "{: >indent$}}}\n", "", indent = indent * INDENT_SIZE)
+				}
 			}
 		}
 
@@ -262,6 +283,7 @@ pub enum NodeKind {
 
 	// Unique
 	If,
+	While,
 }
 
 #[derive(Clone, Copy, Debug)]
