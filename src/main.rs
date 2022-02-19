@@ -19,6 +19,7 @@ fn execute() -> error::Result<()> {
 	let source = r#"
 	# this is a comment
 	
+	a1 + -_1b
 	3 * (4 + 1)
 
 	# this is another comment

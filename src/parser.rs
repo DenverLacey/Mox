@@ -43,6 +43,7 @@ impl Token {
 			Int(_) => TokenPrecedence::None,
 			Num(_) => TokenPrecedence::None,
 			Str(_) => TokenPrecedence::None,
+			Ident(_) => TokenPrecedence::None,
 
 			// Delimeters
 			Newline => TokenPrecedence::None,
@@ -72,6 +73,7 @@ pub enum TokenData {
 	Int(i64),
 	Num(f64),
 	Str(String),
+	Ident(String),
 
 	// Delimeters
 	Newline,
@@ -94,14 +96,15 @@ impl TokenData {
 			Int(_) => 1,
 			Num(_) => 2,
 			Str(_) => 3,
-			Newline => 4,
-			Semicolon => 5,
-			LeftParen => 6,
-			RightParen => 7,
-			Plus => 8,
-			Dash => 9,
-			Star => 10,
-			Slash => 11,
+			Ident(_) => 4,
+			Newline => 5,
+			Semicolon => 6,
+			LeftParen => 7,
+			RightParen => 8,
+			Plus => 9,
+			Dash => 10,
+			Star => 11,
+			Slash => 12,
 		}
 	}
 
@@ -119,6 +122,7 @@ impl Display for TokenData {
 			Int(value) => write!(f, "{}", value),
 			Num(value) => write!(f, "{}", value),
 			Str(value) => write!(f, "{}", value),
+			Ident(ident) => write!(f, "{}", ident),
 
 			// Delimeters
 			Newline => write!(f, "newline"),
@@ -204,6 +208,16 @@ impl<'a> Tokenizer<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
+	fn is_ident_begin(c: &char) -> bool {
+		c.is_alphabetic() || *c == '_'
+	}
+
+	fn is_ident_character(c: &char) -> bool {
+		Self::is_ident_begin(c) || c.is_ascii_digit()
+	}
+}
+
+impl<'a> Tokenizer<'a> {
 	fn peek_char(&mut self) -> Option<&char> {
 		self.source.peek()
 	}
@@ -282,7 +296,7 @@ impl<'a> Tokenizer<'a> {
 				)))
 			} else if c.is_ascii_digit() {
 				Ok(Some(self.tokenize_number()?))
-			} else if c.is_alphabetic() {
+			} else if Self::is_ident_begin(&c) {
 				Ok(Some(self.tokenize_identifier_or_keyword()))
 			} else {
 				Ok(Some(self.tokenize_punctuation()?))
@@ -367,7 +381,14 @@ impl<'a> Tokenizer<'a> {
 	}
 
 	fn tokenize_identifier_or_keyword(&mut self) -> Token {
-		todo!()
+		let mut word = String::new();
+		while let Some(c) = self.next_char_if(Self::is_ident_character) {
+			word.push(c);
+		}
+
+		match word.as_str() {
+			_ => Token::new(TokenData::Ident(word), self.token_location.clone()),
+		}
 	}
 
 	fn tokenize_punctuation(&mut self) -> Result<Token> {
@@ -495,7 +516,14 @@ impl<'a> Parser<'a> {
 			Bool(value) => Ok(self.ast.add_node(Node::new_bool(value), token.location)),
 			Int(value) => Ok(self.ast.add_node(Node::new_int(value), token.location)),
 			Num(value) => Ok(self.ast.add_node(Node::new_num(value), token.location)),
-			Str(_value) => todo!(),
+			Str(value) => {
+				let index = self.ast.add_string(value);
+				Ok(self.ast.add_node(Node::new_str(index), token.location))
+			}
+			Ident(ident) => {
+				let index = self.ast.add_string(ident);
+				Ok(self.ast.add_node(Node::new_ident(index), token.location))
+			}
 
 			// Delimeters
 			LeftParen => {

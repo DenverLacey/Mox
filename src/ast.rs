@@ -10,6 +10,8 @@ use crate::value::ObjID;
 pub struct AST {
 	roots: Vec<usize>,
 	nodes: Vec<Node>,
+	extra_data: Vec<usize>,
+	strings: Vec<String>,
 	locations: Vec<CodeLocation>,
 }
 
@@ -18,6 +20,8 @@ impl AST {
 		Self {
 			roots: Vec::new(),
 			nodes: Vec::new(),
+			extra_data: Vec::new(),
+			strings: Vec::new(),
 			locations: Vec::new(),
 		}
 	}
@@ -32,12 +36,43 @@ impl AST {
 		self.roots.push(root_index);
 	}
 
+	pub fn add_extra_data<E>(&mut self, extra_data: E) -> usize
+	where
+		E: ExtraData,
+	{
+		let extra_data = extra_data.as_slice();
+		let extra_data_index = self.extra_data.len();
+		self.extra_data.extend_from_slice(extra_data);
+		extra_data_index
+	}
+
+	pub fn add_string(&mut self, string: String) -> usize {
+		if let Some(index) = self.strings.iter().position(|s| *s == string) {
+			index
+		} else {
+			self.strings.push(string);
+			self.strings.len() - 1
+		}
+	}
+
 	pub fn get(&self, index: usize) -> &Node {
 		&self.nodes[index]
 	}
 
 	pub fn get_mut(&mut self, index: usize) -> &mut Node {
 		&mut self.nodes[index]
+	}
+
+	pub fn get_extra_data<E>(&self, index: usize) -> E
+	where
+		E: ExtraData,
+	{
+		let slice = self
+			.extra_data
+			.get(index..index + E::len())
+			.expect("Failed to retrieve extra data!");
+
+		E::from(slice)
 	}
 }
 
@@ -62,6 +97,7 @@ impl std::fmt::Display for AST {
 					std::mem::transmute::<usize, f64>(node.lhs)
 				}),
 				Str => todo!(),
+				Ident => write!(f, "Ident({})\n", me.strings[node.lhs]),
 				List => todo!(),
 
 				// Unary
@@ -83,6 +119,7 @@ impl std::fmt::Display for AST {
 			indent: usize,
 			f: &mut std::fmt::Formatter<'_>,
 		) -> std::fmt::Result {
+			let node = me.nodes[node_index];
 			write!(f, "`{}` {{\n", op)?;
 			write!(
 				f,
@@ -91,6 +128,7 @@ impl std::fmt::Display for AST {
 				"sub: ",
 				indent = (indent + 1) * INDENT_SIZE
 			)?;
+			fmt_at_indent(me, node.lhs, indent + 1, f)?;
 			write!(f, "{: >indent$}}}\n", "", indent = indent * INDENT_SIZE)
 		}
 
@@ -155,8 +193,12 @@ impl Node {
 		Self::new(NodeKind::Num, unsafe { std::mem::transmute(value) }, 0)
 	}
 
-	pub fn new_str(value: ObjID) -> Self {
-		Self::new(NodeKind::Str, value, 0)
+	pub fn new_str(index: usize) -> Self {
+		Self::new(NodeKind::Str, index, 0)
+	}
+
+	pub fn new_ident(index: usize) -> Self {
+		Self::new(NodeKind::Ident, index, 0)
 	}
 
 	pub fn new_list(value: ObjID) -> Self {
@@ -171,6 +213,7 @@ pub enum NodeKind {
 	Int,
 	Num,
 	Str,
+	Ident,
 	List,
 
 	// Unary
@@ -182,4 +225,33 @@ pub enum NodeKind {
 	Multiply,
 	Divide,
 	Assign,
+}
+
+pub trait ExtraData {
+	fn len() -> usize;
+	fn from(slice: &[usize]) -> Self;
+
+	fn as_slice(&self) -> &[usize] {
+		unsafe { std::slice::from_raw_parts(self as *const Self as *const usize, Self::len()) }
+	}
+}
+
+pub struct IfExtraData {
+	pub condition: usize,
+	pub then_block: usize,
+	pub else_block: usize, // 0 means no else_block
+}
+
+impl ExtraData for IfExtraData {
+	fn len() -> usize {
+		3
+	}
+
+	fn from(slice: &[usize]) -> Self {
+		Self {
+			condition: slice[0],
+			then_block: slice[1],
+			else_block: slice[2],
+		}
+	}
 }
