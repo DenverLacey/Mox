@@ -6,10 +6,6 @@ mod value;
 use parser::parse;
 
 fn main() {
-	println!("sizeof(AST) = {}", std::mem::size_of::<ast::AST>());
-	println!("sizeof(Node) = {}", std::mem::size_of::<ast::Node>());
-	println!("sizeof(Value) = {}", std::mem::size_of::<value::Value>());
-
 	if let Err(err) = execute() {
 		eprintln!("{}", err);
 	}
@@ -18,9 +14,14 @@ fn main() {
 fn execute() -> error::Result<()> {
 	let source = r#"
 	# this is a comment
-	
 	a1 + -_1b
 	3 * (4 + 1)
+
+	if mybool {
+		9999
+	} else {
+		99.9
+	}
 
 	# this is another comment
 

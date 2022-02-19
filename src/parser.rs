@@ -1,4 +1,4 @@
-use crate::ast::{Node, NodeKind, AST};
+use crate::ast::{self, Node, NodeKind, AST};
 use crate::error::*;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
@@ -50,12 +50,18 @@ impl Token {
 			Semicolon => TokenPrecedence::None,
 			LeftParen => TokenPrecedence::Call,
 			RightParen => TokenPrecedence::None,
+			LeftCurly => TokenPrecedence::None,
+			RightCurly => TokenPrecedence::None,
 
 			// Operators
 			Plus => TokenPrecedence::Term,
 			Dash => TokenPrecedence::Term,
 			Star => TokenPrecedence::Factor,
 			Slash => TokenPrecedence::Factor,
+
+			// Keywords
+			If => TokenPrecedence::None,
+			Else => TokenPrecedence::None,
 		}
 	}
 }
@@ -80,12 +86,18 @@ pub enum TokenData {
 	Semicolon,
 	LeftParen,
 	RightParen,
+	LeftCurly,
+	RightCurly,
 
 	// Operators
 	Plus,
 	Dash,
 	Star,
 	Slash,
+
+	// Keywords
+	If,
+	Else,
 }
 
 impl TokenData {
@@ -101,10 +113,14 @@ impl TokenData {
 			Semicolon => 6,
 			LeftParen => 7,
 			RightParen => 8,
-			Plus => 9,
-			Dash => 10,
-			Star => 11,
-			Slash => 12,
+			LeftCurly => 9,
+			RightCurly => 10,
+			Plus => 11,
+			Dash => 12,
+			Star => 13,
+			Slash => 14,
+			If => 15,
+			Else => 16,
 		}
 	}
 
@@ -129,12 +145,18 @@ impl Display for TokenData {
 			Semicolon => write!(f, ";"),
 			LeftParen => write!(f, "("),
 			RightParen => write!(f, ")"),
+			LeftCurly => write!(f, "{{"),
+			RightCurly => write!(f, "}}"),
 
 			// Operators
 			Plus => write!(f, "+"),
 			Dash => write!(f, "-"),
 			Star => write!(f, "*"),
 			Slash => write!(f, "/"),
+
+			// Keywords
+			If => write!(f, "if"),
+			Else => write!(f, "else"),
 		}
 	}
 }
@@ -387,6 +409,8 @@ impl<'a> Tokenizer<'a> {
 		}
 
 		match word.as_str() {
+			"if" => Token::new(TokenData::If, self.token_location.clone()),
+			"else" => Token::new(TokenData::Else, self.token_location.clone()),
 			_ => Token::new(TokenData::Ident(word), self.token_location.clone()),
 		}
 	}
@@ -400,6 +424,8 @@ impl<'a> Tokenizer<'a> {
 			';' => Ok(Token::new(TokenData::Semicolon, token_location)),
 			'(' => Ok(Token::new(TokenData::LeftParen, token_location)),
 			')' => Ok(Token::new(TokenData::RightParen, token_location)),
+			'{' => Ok(Token::new(TokenData::LeftCurly, token_location)),
+			'}' => Ok(Token::new(TokenData::RightCurly, token_location)),
 			'+' => Ok(Token::new(TokenData::Plus, token_location)),
 			'-' => Ok(Token::new(TokenData::Dash, token_location)),
 			'*' => Ok(Token::new(TokenData::Star, token_location)),
@@ -424,6 +450,55 @@ impl<'a> Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+	fn check(&mut self, data_kind: &TokenData) -> Result<bool> {
+		let next = self.tokenizer.peek()?;
+		if let Some(next) = next {
+			Ok(next.data.tag() == data_kind.tag())
+		} else {
+			Ok(false)
+		}
+	}
+
+	fn check_eof(&mut self) -> Result<bool> {
+		Ok(self.tokenizer.peek()?.is_none())
+	}
+
+	fn check_and_consume(&mut self, data_kind: &TokenData) -> Result<bool> {
+		if self.check(data_kind)? {
+			self.tokenizer.next().expect("We peek in check");
+			Ok(true)
+		} else {
+			Ok(false)
+		}
+	}
+
+	fn skip_check(&mut self, data_kind: &TokenData) -> Result<bool> {
+		self.skip_newlines()?;
+
+		let next = self.tokenizer.peek()?;
+		if let Some(next) = next {
+			Ok(next.data.tag() == data_kind.tag())
+		} else {
+			Ok(false)
+		}
+	}
+
+	fn skip_check_eof(&mut self) -> Result<bool> {
+		self.skip_newlines()?;
+		Ok(self.tokenizer.peek()?.is_none())
+	}
+
+	fn skip_check_and_consume(&mut self, data_kind: &TokenData) -> Result<bool> {
+		self.skip_newlines()?;
+
+		if self.check(data_kind)? {
+			self.tokenizer.next().expect("We peek in check");
+			Ok(true)
+		} else {
+			Ok(false)
+		}
+	}
+
 	fn expect(&mut self, data_kind: &TokenData, err: impl Into<String>) -> Result<Token> {
 		let next = self
 			.tokenizer
@@ -434,6 +509,11 @@ impl<'a> Parser<'a> {
 		} else {
 			Ok(next)
 		}
+	}
+
+	fn skip_expect(&mut self, data_kind: &TokenData, err: impl Into<String>) -> Result<Token> {
+		self.skip_newlines()?;
+		self.expect(data_kind, err)
 	}
 
 	fn expect_statement_terminator(&mut self, err: impl Into<String>) -> Result<Token> {
@@ -452,6 +532,18 @@ impl<'a> Parser<'a> {
 			}) => Ok(token.unwrap()),
 			Some(t) => ErrAt(t.location, err.into()),
 		}
+	}
+
+	fn skip_newlines(&mut self) -> Result<()> {
+		while let Some(&Token {
+			data: TokenData::Newline,
+			location: _,
+		}) = self.tokenizer.peek()?
+		{
+			self.tokenizer.next().expect("We already peeked!");
+		}
+
+		Ok(())
 	}
 
 	fn parse_declaration(&mut self) -> Result<usize> {
@@ -555,6 +647,9 @@ impl<'a> Parser<'a> {
 				}
 			}
 
+			// Keywords
+			If => self.parse_if(token),
+
 			_ => ErrAt(
 				token.location.clone(),
 				format!("`{}` is not a prefix operation!", token),
@@ -606,6 +701,59 @@ impl<'a> Parser<'a> {
 		let precedence = precedence.next();
 		let rhs = self.parse_precedence(precedence)?;
 		Ok(self.ast.add_node(Node::new(kind, lhs, rhs), location))
+	}
+
+	fn parse_block(&mut self, kind: NodeKind) -> Result<usize> {
+		let mut roots = Vec::new();
+
+		let block_location = self
+			.skip_expect(
+				&TokenData::LeftCurly,
+				format!("Expected `{}` to begin block.", TokenData::LeftCurly),
+			)?
+			.location;
+
+		loop {
+			self.skip_newlines()?;
+			if self.check(&TokenData::RightCurly)? || self.check_eof()? {
+				break;
+			}
+			roots.push(self.parse_declaration()?);
+		}
+
+		self.expect(
+			&TokenData::RightCurly,
+			format!("Expected `{}` to terminate block.", TokenData::RightCurly),
+		)?;
+
+		let block = self.ast.add_block(ast::NodeBlock::new(kind, roots));
+		Ok(self.ast.add_node(Node::new(kind, block, 0), block_location))
+	}
+
+	fn parse_if(&mut self, token: Token) -> Result<usize> {
+		let if_location = token.location;
+
+		self.skip_newlines()?;
+		let condition = self.parse_expression()?;
+
+		let then_block = self.parse_block(NodeKind::Block)?;
+		let else_block = if self.skip_check_and_consume(&TokenData::Else)? {
+			// @TODO: Handle else if
+			self.parse_block(NodeKind::Block)?
+		} else {
+			0
+		};
+
+		let if_data = self.ast.add_extra_data(ast::ExtraDataIf {
+			condition,
+			then_block,
+			else_block,
+		});
+		Ok(
+			self
+				.ast
+				.add_node(Node::new(NodeKind::If, if_data, 0), if_location),
+		)
 	}
 }
 

@@ -12,6 +12,7 @@ pub struct AST {
 	nodes: Vec<Node>,
 	extra_data: Vec<usize>,
 	strings: Vec<String>,
+	blocks: Vec<NodeBlock>,
 	locations: Vec<CodeLocation>,
 }
 
@@ -22,6 +23,7 @@ impl AST {
 			nodes: Vec::new(),
 			extra_data: Vec::new(),
 			strings: Vec::new(),
+			blocks: Vec::new(),
 			locations: Vec::new(),
 		}
 	}
@@ -53,6 +55,11 @@ impl AST {
 			self.strings.push(string);
 			self.strings.len() - 1
 		}
+	}
+
+	pub fn add_block(&mut self, block: NodeBlock) -> usize {
+		self.blocks.push(block);
+		self.blocks.len() - 1
 	}
 
 	pub fn get(&self, index: usize) -> &Node {
@@ -109,6 +116,44 @@ impl std::fmt::Display for AST {
 				Multiply => fmt_binary_at_indent("*", me, node_index, indent, f),
 				Divide => fmt_binary_at_indent("/", me, node_index, indent, f),
 				Assign => fmt_binary_at_indent("=", me, node_index, indent, f),
+
+				// Blocks
+				Block => fmt_block_at_indent("{}", me, node_index, indent, f),
+
+				// Unique
+				If => {
+					let data: ExtraDataIf = me.get_extra_data(node.lhs);
+
+					write!(f, "`if` {{\n")?;
+
+					write!(
+						f,
+						"{: >indent$}condition: ",
+						"",
+						indent = (indent + 1) * INDENT_SIZE
+					)?;
+					fmt_at_indent(me, data.condition, indent + 1, f)?;
+
+					write!(
+						f,
+						"{: >indent$}then: ",
+						"",
+						indent = (indent + 1) * INDENT_SIZE
+					)?;
+					fmt_at_indent(me, data.then_block, indent + 1, f)?;
+
+					if data.else_block != 0 {
+						write!(
+							f,
+							"{: >indent$}else: ",
+							"",
+							indent = (indent + 1) * INDENT_SIZE
+						)?;
+						fmt_at_indent(me, data.else_block, indent + 1, f)?;
+					}
+
+					write!(f, "{: >indent$}}}\n", "", indent = indent * INDENT_SIZE)
+				}
 			}
 		}
 
@@ -160,6 +205,29 @@ impl std::fmt::Display for AST {
 			write!(f, "{: >indent$}}}\n", "", indent = indent * INDENT_SIZE)
 		}
 
+		fn fmt_block_at_indent(
+			op: &str,
+			me: &AST,
+			node_index: usize,
+			indent: usize,
+			f: &mut std::fmt::Formatter<'_>,
+		) -> std::fmt::Result {
+			let node = me.nodes[node_index];
+			let block = &me.blocks[node.lhs];
+			write!(f, "`{}` {{\n", op)?;
+			for (i, &root) in block.roots.iter().enumerate() {
+				write!(
+					f,
+					"{: >indent$}{}. ",
+					"",
+					i,
+					indent = (indent + 1) * INDENT_SIZE
+				)?;
+				fmt_at_indent(me, root, indent + 1, f)?;
+			}
+			write!(f, "{: >indent$}}}\n", "", indent = indent * INDENT_SIZE)
+		}
+
 		write!(f, "AST {{\n")?;
 		for (i, &root) in self.roots.iter().enumerate() {
 			write!(f, "{: >indent$}{}. ", "", i, indent = INDENT_SIZE)?;
@@ -167,6 +235,33 @@ impl std::fmt::Display for AST {
 		}
 		write!(f, "}}")
 	}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NodeKind {
+	// Literals
+	Bool,
+	Int,
+	Num,
+	Str,
+	Ident,
+	List,
+
+	// Unary
+	Negate,
+
+	// Binary
+	Add,
+	Subtract,
+	Multiply,
+	Divide,
+	Assign,
+
+	// Blocks
+	Block,
+
+	// Unique
+	If,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -206,25 +301,16 @@ impl Node {
 	}
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum NodeKind {
-	// Literals
-	Bool,
-	Int,
-	Num,
-	Str,
-	Ident,
-	List,
+#[derive(Debug)]
+pub struct NodeBlock {
+	pub kind: NodeKind,
+	pub roots: Vec<usize>,
+}
 
-	// Unary
-	Negate,
-
-	// Binary
-	Add,
-	Subtract,
-	Multiply,
-	Divide,
-	Assign,
+impl NodeBlock {
+	pub fn new(kind: NodeKind, roots: Vec<usize>) -> Self {
+		Self { kind, roots }
+	}
 }
 
 pub trait ExtraData {
@@ -236,19 +322,20 @@ pub trait ExtraData {
 	}
 }
 
-pub struct IfExtraData {
+#[repr(C)] // We need repr(C) to guarentee fields are in the expencted places
+pub struct ExtraDataIf {
 	pub condition: usize,
 	pub then_block: usize,
 	pub else_block: usize, // 0 means no else_block
 }
 
-impl ExtraData for IfExtraData {
+impl ExtraData for ExtraDataIf {
 	fn len() -> usize {
 		3
 	}
 
 	fn from(slice: &[usize]) -> Self {
-		Self {
+		ExtraDataIf {
 			condition: slice[0],
 			then_block: slice[1],
 			else_block: slice[2],
