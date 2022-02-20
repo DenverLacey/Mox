@@ -241,6 +241,10 @@ impl<'a> Tokenizer<'a> {
 	fn is_ident_character(c: &char) -> bool {
 		Self::is_ident_begin(c) || c.is_ascii_digit()
 	}
+
+	fn is_string_begin(c: char) -> bool {
+		c == '"' || c == '\''
+	}
 }
 
 impl<'a> Tokenizer<'a> {
@@ -250,8 +254,13 @@ impl<'a> Tokenizer<'a> {
 
 	fn next_char(&mut self) -> Option<char> {
 		let maybe_next_char = self.source.next();
-		if maybe_next_char.is_some() {
-			self.coloumn += 1;
+		if let Some(c) = maybe_next_char {
+			if c == '\n' {
+				self.line += 1;
+				self.coloumn = 0;
+			} else {
+				self.coloumn += 1;
+			}
 		}
 		maybe_next_char
 	}
@@ -261,16 +270,26 @@ impl<'a> Tokenizer<'a> {
 		F: FnOnce(&char) -> bool,
 	{
 		let maybe_next_char = self.source.next_if(f);
-		if maybe_next_char.is_some() {
-			self.coloumn += 1;
+		if let Some(c) = maybe_next_char {
+			if c == '\n' {
+				self.line += 1;
+				self.coloumn = 0;
+			} else {
+				self.coloumn += 1;
+			}
 		}
 		maybe_next_char
 	}
 
 	fn next_char_if_eq(&mut self, c: char) -> Option<char> {
 		let maybe_next_char = self.source.next_if_eq(&c);
-		if maybe_next_char.is_some() {
-			self.coloumn += 1;
+		if let Some(c) = maybe_next_char {
+			if c == '\n' {
+				self.line += 1;
+				self.coloumn = 0;
+			} else {
+				self.coloumn += 1;
+			}
 		}
 		maybe_next_char
 	}
@@ -322,7 +341,7 @@ impl<'a> Tokenizer<'a> {
 				)))
 			} else if c.is_ascii_digit() {
 				Ok(Some(self.tokenize_number()?))
-			} else if c == '"' || c == '\'' {
+			} else if Self::is_string_begin(c) {
 				Ok(Some(self.tokenize_string()?))
 			} else if Self::is_ident_begin(&c) {
 				Ok(Some(self.tokenize_identifier_or_keyword()))
@@ -339,23 +358,17 @@ impl<'a> Tokenizer<'a> {
 			match self.peek_char() {
 				None => break,
 				Some(c) => match c {
-					'#' => {
-						loop {
-							if matches!(self.next_char(), Some('\n') | None) {
-								break;
-							}
+					'#' => loop {
+						if matches!(self.next_char(), Some('\n') | None) {
+							break;
 						}
-						self.line += 1;
-						self.coloumn = 0;
-					}
+					},
 					'\n' => {
 						if !self.previous_was_newline {
 							break;
 						}
 
-						self.source.next().expect("We already checked for `None`.");
-						self.line += 1;
-						self.coloumn = 0;
+						self.next_char().expect("We already checked for `None`.");
 					}
 					_ if !c.is_whitespace() => break,
 					_ => {
@@ -417,9 +430,9 @@ impl<'a> Tokenizer<'a> {
 
 		loop {
 			match self.next_char() {
-				None => return SimpleErrAt(self.token_location.clone(), "Unended string literal!"),
+				None => return SimpleErrAt(self.token_location.clone(), "Unended string literal."),
 				Some('\\') => match self.next_char() {
-					None => return SimpleErrAt(self.token_location.clone(), "Unended string literal!"),
+					None => return SimpleErrAt(self.token_location.clone(), "Unended string literal."),
 					Some('0') => word.push('\0'),
 					Some('e') => todo!(),
 					Some('n') => word.push('\n'),
@@ -434,7 +447,7 @@ impl<'a> Tokenizer<'a> {
 					Some(c) => {
 						return ErrAt(
 							self.current_location(),
-							format!("`\\{}` is not a valid escape sequence", c),
+							format!("`\\{}` is not a valid escape sequence.", c),
 						)
 					}
 				},
@@ -467,7 +480,7 @@ impl<'a> Tokenizer<'a> {
 		let token_location = self.token_location.clone();
 		match self.next_char().ok_or(Error::SimpleErrAt(
 			token_location.clone(),
-			"self.source.next() failed!",
+			"self.source.next() failed.",
 		))? {
 			';' => Ok(Token::new(TokenData::Semicolon, token_location)),
 			'(' => Ok(Token::new(TokenData::LeftParen, token_location)),
@@ -581,7 +594,7 @@ impl<'a> Parser<'a> {
 		let next = self
 			.tokenizer
 			.next()?
-			.ok_or(Error::SimpleErr("Unexpected end of file!"))?;
+			.ok_or(Error::SimpleErr("Unexpected end of file."))?;
 		if !next.data.eq_kind(data_kind) {
 			ErrAt(next.location, err.into())
 		} else {
@@ -699,7 +712,7 @@ impl<'a> Parser<'a> {
 		let idx = self.parse_expression_or_assignment()?;
 
 		if self.ast.get(idx).kind == NodeKind::Assign {
-			SimpleErr("Cannot assign in expression context!")
+			SimpleErr("Cannot assign in expression context.")
 		} else {
 			Ok(idx)
 		}
@@ -709,13 +722,13 @@ impl<'a> Parser<'a> {
 		let token = self
 			.tokenizer
 			.next()?
-			.ok_or(Error::SimpleErr("Unexpected end of file!"))?;
+			.ok_or(Error::SimpleErr("Unexpected end of file."))?;
 		let mut previous = self.parse_prefix(token)?;
 		while precedence
 			<= self
 				.tokenizer
 				.peek()?
-				.ok_or(Error::SimpleErr("Unexpected end of file!"))?
+				.ok_or(Error::SimpleErr("Unexpected end of file."))?
 				.precedence()
 		{
 			let token = self
@@ -762,7 +775,7 @@ impl<'a> Parser<'a> {
 				let next = self
 					.tokenizer
 					.peek()?
-					.ok_or(Error::SimpleErr("Unexpected end of input!"))?;
+					.ok_or(Error::SimpleErr("Unexpected end of input."))?;
 				if let TokenData::Int(value) = next.data {
 					self.tokenizer.next().expect("We just peeked this");
 					Ok(self.ast.add_node(Node::new_int(-value), token.location))
@@ -780,7 +793,7 @@ impl<'a> Parser<'a> {
 
 			_ => ErrAt(
 				token.location.clone(),
-				format!("`{}` is not a prefix operation!", token),
+				format!("`{}` is not a prefix operation.", token),
 			),
 		}
 	}
@@ -809,7 +822,7 @@ impl<'a> Parser<'a> {
 			),
 			_ => ErrAt(
 				token.location.clone(),
-				format!("`{}` is not an infix operation!", token),
+				format!("`{}` is not an infix operation.", token),
 			),
 		}
 	}

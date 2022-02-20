@@ -34,14 +34,12 @@ impl Debug for Error {
 
 impl Display for Error {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(f, "Error")?;
-
 		use Error::*;
 		match self {
-			SimpleErr(err) => write!(f, ": {}", err),
-			Err(err) => write!(f, ": {}", err),
-			SimpleErrAt(location, err) => write!(f, ": {}: {}", location, err),
-			ErrAt(location, err) => write!(f, ": {}: {}", location, err),
+			SimpleErr(err) => write!(f, "Error: {}", err),
+			Err(err) => write!(f, "Error: {}", err),
+			SimpleErrAt(location, err) => write!(f, "{}: Error: {}", location, err),
+			ErrAt(location, err) => write!(f, "{}: Error: {}", location, err),
 		}
 	}
 }

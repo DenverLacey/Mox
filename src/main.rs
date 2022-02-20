@@ -30,6 +30,8 @@ fn execute() -> error::Result<()> {
 		}
 
 		"\tHellothere!\nI love you"
+		'This is another string"'
+		"\w"
 
 		# this is another comment
 
