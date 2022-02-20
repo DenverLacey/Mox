@@ -47,6 +47,7 @@ impl Token {
 
 			// Delimeters
 			Newline => TokenPrecedence::None,
+			Comma => TokenPrecedence::None,
 			Semicolon => TokenPrecedence::None,
 			LeftParen => TokenPrecedence::Call,
 			RightParen => TokenPrecedence::None,
@@ -85,6 +86,7 @@ pub enum TokenData {
 
 	// Delimeters
 	Newline,
+	Comma,
 	Semicolon,
 	LeftParen,
 	RightParen,
@@ -114,19 +116,20 @@ impl TokenData {
 			Str(_) => 3,
 			Ident(_) => 4,
 			Newline => 5,
-			Semicolon => 6,
-			LeftParen => 7,
-			RightParen => 8,
-			LeftCurly => 9,
-			RightCurly => 10,
-			Plus => 11,
-			Dash => 12,
-			Star => 13,
-			Slash => 14,
-			If => 15,
-			Else => 16,
-			While => 17,
-			Def => 18,
+			Comma => 6,
+			Semicolon => 7,
+			LeftParen => 8,
+			RightParen => 9,
+			LeftCurly => 10,
+			RightCurly => 11,
+			Plus => 12,
+			Dash => 13,
+			Star => 14,
+			Slash => 15,
+			If => 16,
+			Else => 17,
+			While => 18,
+			Def => 19,
 		}
 	}
 
@@ -149,6 +152,7 @@ impl Display for TokenData {
 			// Delimeters
 			Newline => write!(f, "newline"),
 			Semicolon => write!(f, ";"),
+			Comma => write!(f, ","),
 			LeftParen => write!(f, "("),
 			RightParen => write!(f, ")"),
 			LeftCurly => write!(f, "{{"),
@@ -487,6 +491,7 @@ impl<'a> Tokenizer<'a> {
 			token_location.clone(),
 			"self.source.next() failed.",
 		))? {
+			',' => Ok(Token::new(TokenData::Comma, token_location)),
 			';' => Ok(Token::new(TokenData::Semicolon, token_location)),
 			'(' => Ok(Token::new(TokenData::LeftParen, token_location)),
 			')' => Ok(Token::new(TokenData::RightParen, token_location)),
@@ -842,7 +847,7 @@ impl<'a> Parser<'a> {
 		Ok(self.ast.add_node(Node::new(kind, lhs, rhs), location))
 	}
 
-	fn parse_block(&mut self, kind: NodeKind) -> Result<usize> {
+	fn parse_block(&mut self, kind: BlockKind) -> Result<usize> {
 		let mut roots = Vec::new();
 
 		let block_location = self
@@ -866,7 +871,11 @@ impl<'a> Parser<'a> {
 		)?;
 
 		let block = self.ast.add_block(NodeBlock::new(kind, roots));
-		Ok(self.ast.add_node(Node::new(kind, block, 0), block_location))
+		Ok(
+			self
+				.ast
+				.add_node(Node::new(NodeKind::Block, block, 0), block_location),
+		)
 	}
 
 	fn parse_if(&mut self, token: Token) -> Result<usize> {
@@ -875,7 +884,7 @@ impl<'a> Parser<'a> {
 		self.skip_newlines()?;
 		let condition = self.parse_expression()?;
 
-		let then_block = self.parse_block(NodeKind::Block)?;
+		let then_block = self.parse_block(BlockKind::Block)?;
 		let else_block = if self.peek_check_and_consume(&TokenData::Else)?.is_some() {
 			if self.skip_check(&TokenData::If)? {
 				let if_token = self
@@ -885,7 +894,7 @@ impl<'a> Parser<'a> {
 					.expect("Peeked by `skip_check`");
 				self.parse_if(if_token)?
 			} else {
-				self.parse_block(NodeKind::Block)?
+				self.parse_block(BlockKind::Block)?
 			}
 		} else {
 			0
@@ -909,7 +918,7 @@ impl<'a> Parser<'a> {
 
 		self.skip_newlines()?;
 		let condition = self.parse_expression()?;
-		let body = self.parse_block(NodeKind::Block)?;
+		let body = self.parse_block(BlockKind::Block)?;
 
 		Ok(
 			self
@@ -951,7 +960,42 @@ impl<'a> Parser<'a> {
 			),
 		)?;
 
-		let params = 0;
+		let mut param_idents = Vec::new();
+		let mut param_location = None;
+		loop {
+			if self.check(&TokenData::RightParen)? || self.check_eof()? {
+				break;
+			}
+
+			let token = self.expect(&TokenData::Ident(String::new()), "Expected parameter name.")?;
+
+			if param_location.is_none() {
+				param_location = Some(token.location);
+			}
+
+			if let TokenData::Ident(ident) = token.data {
+				let ident = self.ast.add_string(ident);
+				param_idents.push(ident);
+			} else {
+				unreachable!();
+			}
+
+			if !self.check_and_consume(&TokenData::Comma)?.is_some() || self.check_eof()? {
+				break;
+			}
+		}
+
+		let params = if param_idents.is_empty() {
+			0
+		} else {
+			let param_block = self
+				.ast
+				.add_block(NodeBlock::new(BlockKind::Comma, param_idents));
+			self.ast.add_node(
+				Node::new(NodeKind::Block, param_block, 0),
+				param_location.expect("Should be set if there are params"),
+			)
+		};
 
 		self.expect(
 			&TokenData::RightParen,
@@ -961,7 +1005,7 @@ impl<'a> Parser<'a> {
 			),
 		)?;
 
-		let body = self.parse_block(NodeKind::Block)?;
+		let body = self.parse_block(BlockKind::Block)?;
 
 		let def_data = self.ast.add_extra_data(ExtraDataDef {
 			ident,

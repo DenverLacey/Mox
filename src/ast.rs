@@ -118,7 +118,14 @@ impl std::fmt::Display for AST {
 				Assign => fmt_binary_at_indent("=", me, node_index, indent, f),
 
 				// Blocks
-				Block => fmt_block_at_indent("{}", me, node_index, indent, f),
+				Block => {
+					let block = &me.blocks[node.lhs];
+					let op = match block.kind {
+						BlockKind::Block => "{}",
+						BlockKind::Comma => ",",
+					};
+					fmt_block_at_indent(op, me, node_index, indent, f)
+				}
 
 				// Unique
 				If => {
@@ -191,11 +198,29 @@ impl std::fmt::Display for AST {
 					if data.params != 0 {
 						write!(
 							f,
-							"{: >indent$}params: ",
+							"{: >indent$}params: `,` {{\n",
 							"",
 							indent = (indent + 1) * INDENT_SIZE
 						)?;
-						fmt_at_indent(me, data.params, indent + 1, f)?;
+
+						let params = &me.blocks[me.nodes[data.params].lhs];
+						for (i, &param) in params.roots.iter().enumerate() {
+							write!(
+								f,
+								"{: >indent$}{}. Ident({})\n",
+								"",
+								i,
+								me.strings[param],
+								indent = (indent + 2) * INDENT_SIZE
+							)?;
+						}
+
+						write!(
+							f,
+							"{: >indent$}}}\n",
+							"",
+							indent = (indent + 1) * INDENT_SIZE
+						)?;
 					}
 
 					write!(
@@ -359,14 +384,20 @@ impl Node {
 
 #[derive(Debug)]
 pub struct NodeBlock {
-	pub kind: NodeKind,
+	pub kind: BlockKind,
 	pub roots: Vec<usize>,
 }
 
 impl NodeBlock {
-	pub fn new(kind: NodeKind, roots: Vec<usize>) -> Self {
+	pub fn new(kind: BlockKind, roots: Vec<usize>) -> Self {
 		Self { kind, roots }
 	}
+}
+
+#[derive(Debug)]
+pub enum BlockKind {
+	Block,
+	Comma,
 }
 
 pub trait ExtraData
