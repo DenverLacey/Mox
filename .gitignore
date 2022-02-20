@@ -11,3 +11,4 @@ Cargo.lock
 
 # Specific files
 .DS_Store
+test-dev.sh

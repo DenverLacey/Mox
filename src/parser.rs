@@ -20,7 +20,7 @@ impl CodeLocation {
 
 impl Display for CodeLocation {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}:{}:{}", self.line + 1, self.col + 1, self.file)
+		write!(f, "{}:{}:{}", self.file, self.line + 1, self.col + 1)
 	}
 }
 
@@ -63,6 +63,7 @@ impl Token {
 			If => TokenPrecedence::None,
 			Else => TokenPrecedence::None,
 			While => TokenPrecedence::None,
+			Def => TokenPrecedence::None,
 		}
 	}
 }
@@ -100,6 +101,7 @@ pub enum TokenData {
 	If,
 	Else,
 	While,
+	Def,
 }
 
 impl TokenData {
@@ -124,6 +126,7 @@ impl TokenData {
 			If => 15,
 			Else => 16,
 			While => 17,
+			Def => 18,
 		}
 	}
 
@@ -161,6 +164,7 @@ impl Display for TokenData {
 			If => write!(f, "if"),
 			Else => write!(f, "else"),
 			While => write!(f, "while"),
+			Def => write!(f, "def"),
 		}
 	}
 }
@@ -472,6 +476,7 @@ impl<'a> Tokenizer<'a> {
 			"if" => Token::new(TokenData::If, self.token_location.clone()),
 			"else" => Token::new(TokenData::Else, self.token_location.clone()),
 			"while" => Token::new(TokenData::While, self.token_location.clone()),
+			"def" => Token::new(TokenData::Def, self.token_location.clone()),
 			_ => Token::new(TokenData::Ident(word), self.token_location.clone()),
 		}
 	}
@@ -554,40 +559,33 @@ impl<'a> Parser<'a> {
 		Ok(self.tokenizer.peek_n(i)?.is_none())
 	}
 
-	fn check_and_consume(&mut self, data_kind: &TokenData) -> Result<bool> {
+	fn check_and_consume(&mut self, data_kind: &TokenData) -> Result<Option<Token>> {
 		if self.check(data_kind)? {
-			self.tokenizer.next().expect("We peek in check");
-			Ok(true)
+			Ok(self.tokenizer.next().expect("We peek in check"))
 		} else {
-			Ok(false)
+			Ok(None)
 		}
 	}
 
-	fn skip_check_and_consume(&mut self, data_kind: &TokenData) -> Result<bool> {
+	fn skip_check_and_consume(&mut self, data_kind: &TokenData) -> Result<Option<Token>> {
 		self.skip_newlines()?;
 
 		if self.check(data_kind)? {
-			self.tokenizer.next().expect("We peek in check");
-			Ok(true)
+			Ok(self.tokenizer.next().expect("We peek in check"))
 		} else {
-			Ok(false)
+			Ok(None)
 		}
 	}
 
-	fn peek_check_and_consume(&mut self, data_kind: &TokenData) -> Result<bool> {
+	fn peek_check_and_consume(&mut self, data_kind: &TokenData) -> Result<Option<Token>> {
 		let i = self.peek_newlines()?;
 		if let Some(t) = self.tokenizer.peek_n(i)? {
 			if data_kind.eq_kind(&t.data) {
 				self.flush_peeked_newlines();
-				self
-					.tokenizer
-					.next()
-					.expect("We already peeked")
-					.expect("We already peeked");
-				return Ok(true);
+				return Ok(self.tokenizer.next().expect("We already peeked"));
 			}
 		}
-		return Ok(false);
+		return Ok(None);
 	}
 
 	fn expect(&mut self, data_kind: &TokenData, err: impl Into<String>) -> Result<Token> {
@@ -687,8 +685,8 @@ impl<'a> Parser<'a> {
 
 impl<'a> Parser<'a> {
 	fn parse_declaration(&mut self) -> Result<usize> {
-		if false {
-			todo!("THis is where declaration parsing functions will go.");
+		if self.check(&TokenData::Def)? {
+			self.parse_def()
 		} else {
 			self.parse_statement()
 		}
@@ -878,7 +876,7 @@ impl<'a> Parser<'a> {
 		let condition = self.parse_expression()?;
 
 		let then_block = self.parse_block(NodeKind::Block)?;
-		let else_block = if self.peek_check_and_consume(&TokenData::Else)? {
+		let else_block = if self.peek_check_and_consume(&TokenData::Else)?.is_some() {
 			if self.skip_check(&TokenData::If)? {
 				let if_token = self
 					.tokenizer
@@ -919,11 +917,74 @@ impl<'a> Parser<'a> {
 				.add_node(Node::new(NodeKind::While, condition, body), while_location),
 		)
 	}
+
+	fn parse_def(&mut self) -> Result<usize> {
+		let def_location = self
+			.tokenizer
+			.next()
+			.expect("We already peeked in `parse_declaration`")
+			.expect("We already peeked in `parse_declaration`")
+			.location;
+
+		let ident = self.expect(
+			&TokenData::Ident(String::new()),
+			format!("Expected an identifer after keyword `{}`.", TokenData::Def),
+		)?;
+
+		let ident = if let Token {
+			data: TokenData::Ident(ident),
+			location: _,
+		} = ident
+		{
+			ident
+		} else {
+			unreachable!("We already know its an Ident");
+		};
+
+		let ident = self.ast.add_string(ident);
+
+		self.expect(
+			&TokenData::LeftParen,
+			format!(
+				"Expected `{}` to begin parameter list.",
+				TokenData::LeftParen
+			),
+		)?;
+
+		let params = 0;
+
+		self.expect(
+			&TokenData::RightParen,
+			format!(
+				"Expected `{}` to terminate parameter list.",
+				TokenData::RightParen
+			),
+		)?;
+
+		let body = self.parse_block(NodeKind::Block)?;
+
+		let def_data = self.ast.add_extra_data(ExtraDataDef {
+			ident,
+			params,
+			body,
+		});
+
+		Ok(
+			self
+				.ast
+				.add_node(Node::new(NodeKind::Def, def_data, 0), def_location),
+		)
+	}
 }
 
 pub fn parse<'a>(source: Peekable<Chars<'a>>, filename: String) -> Result<AST> {
 	let mut p = Parser::new(source, filename);
-	while p.tokenizer.peek()?.is_some() {
+	loop {
+		p.skip_newlines()?;
+		if p.tokenizer.peek()?.is_none() {
+			break;
+		}
+
 		let root = p.parse_declaration()?;
 		p.ast.add_root(root);
 	}

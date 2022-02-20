@@ -1,0 +1,24 @@
+# this is a comment
+a1 + -_1b
+3 * (4 + 1)
+
+if my_bool {
+	9999
+} else if 1 {
+	99.9
+} else {
+	666
+}
+
+while my_other_bool {
+	69240
+}
+
+"\tHellothere!\nI love you"
+'This is another string"'
+
+def add() {
+	a + b
+}
+
+# this is another comment

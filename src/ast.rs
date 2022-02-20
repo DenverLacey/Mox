@@ -175,6 +175,39 @@ impl std::fmt::Display for AST {
 
 					write!(f, "{: >indent$}}}\n", "", indent = indent * INDENT_SIZE)
 				}
+				Def => {
+					let data: ExtraDataDef = me.get_extra_data(node.lhs);
+
+					write!(f, "`def` {{\n")?;
+
+					write!(
+						f,
+						"{: >indent$}ident: {}\n",
+						"",
+						me.strings[data.ident],
+						indent = (indent + 1) * INDENT_SIZE
+					)?;
+
+					if data.params != 0 {
+						write!(
+							f,
+							"{: >indent$}params: ",
+							"",
+							indent = (indent + 1) * INDENT_SIZE
+						)?;
+						fmt_at_indent(me, data.params, indent + 1, f)?;
+					}
+
+					write!(
+						f,
+						"{: >indent$}body: ",
+						"",
+						indent = (indent + 1) * INDENT_SIZE
+					)?;
+					fmt_at_indent(me, data.body, indent + 1, f)?;
+
+					write!(f, "{: >indent$}}}\n", "", indent = indent * INDENT_SIZE)
+				}
 			}
 		}
 
@@ -284,6 +317,7 @@ pub enum NodeKind {
 	// Unique
 	If,
 	While,
+	Def,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -372,3 +406,4 @@ macro_rules! impl_extra_data {
 }
 
 impl_extra_data!(ExtraDataIf; condition, then_block, else_block);
+impl_extra_data!(ExtraDataDef; ident, params, body);
