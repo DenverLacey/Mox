@@ -1,6 +1,8 @@
+use enum_tags::*;
+
 pub type ObjID = usize;
 
-#[derive(Debug)]
+#[derive(Debug, Tag)]
 pub enum Value {
 	Bool(bool),
 	Int(i64),

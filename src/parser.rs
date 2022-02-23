@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::error::*;
+use enum_tags::*;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::iter::Peekable;
@@ -75,7 +76,7 @@ impl Display for Token {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug, Tag)]
 pub enum TokenData {
 	// Literals
 	Bool(bool),
@@ -104,38 +105,6 @@ pub enum TokenData {
 	Else,
 	While,
 	Def,
-}
-
-impl TokenData {
-	const fn tag(&self) -> u8 {
-		use TokenData::*;
-		match self {
-			Bool(_) => 0,
-			Int(_) => 1,
-			Num(_) => 2,
-			Str(_) => 3,
-			Ident(_) => 4,
-			Newline => 5,
-			Comma => 6,
-			Semicolon => 7,
-			LeftParen => 8,
-			RightParen => 9,
-			LeftCurly => 10,
-			RightCurly => 11,
-			Plus => 12,
-			Dash => 13,
-			Star => 14,
-			Slash => 15,
-			If => 16,
-			Else => 17,
-			While => 18,
-			Def => 19,
-		}
-	}
-
-	fn eq_kind(&self, other: &Self) -> bool {
-		self.tag() == other.tag()
-	}
 }
 
 impl Display for TokenData {
@@ -521,30 +490,30 @@ impl<'a> Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-	fn check(&mut self, data_kind: &TokenData) -> Result<bool> {
+	fn check(&mut self, data_tag: TokenDataTag) -> Result<bool> {
 		let next = self.tokenizer.peek()?;
 		if let Some(next) = next {
-			Ok(next.data.tag() == data_kind.tag())
+			Ok(next.data.tag() == data_tag)
 		} else {
 			Ok(false)
 		}
 	}
 
-	fn skip_check(&mut self, data_kind: &TokenData) -> Result<bool> {
+	fn skip_check(&mut self, data_tag: TokenDataTag) -> Result<bool> {
 		self.skip_newlines()?;
 
 		let next = self.tokenizer.peek()?;
 		if let Some(next) = next {
-			Ok(next.data.tag() == data_kind.tag())
+			Ok(next.data.tag() == data_tag)
 		} else {
 			Ok(false)
 		}
 	}
 
-	fn peek_check(&mut self, data_kind: &TokenData) -> Result<bool> {
+	fn peek_check(&mut self, data_tag: TokenDataTag) -> Result<bool> {
 		let i = self.peek_newlines()?;
 		if let Some(t) = self.tokenizer.peek_n(i)? {
-			Ok(data_kind.eq_kind(&t.data))
+			Ok(data_tag == t.data.tag())
 		} else {
 			Ok(false)
 		}
@@ -564,28 +533,28 @@ impl<'a> Parser<'a> {
 		Ok(self.tokenizer.peek_n(i)?.is_none())
 	}
 
-	fn check_and_consume(&mut self, data_kind: &TokenData) -> Result<Option<Token>> {
-		if self.check(data_kind)? {
+	fn check_and_consume(&mut self, data_tag: TokenDataTag) -> Result<Option<Token>> {
+		if self.check(data_tag)? {
 			Ok(self.tokenizer.next().expect("We peek in check"))
 		} else {
 			Ok(None)
 		}
 	}
 
-	fn skip_check_and_consume(&mut self, data_kind: &TokenData) -> Result<Option<Token>> {
+	fn skip_check_and_consume(&mut self, data_tag: TokenDataTag) -> Result<Option<Token>> {
 		self.skip_newlines()?;
 
-		if self.check(data_kind)? {
+		if self.check(data_tag)? {
 			Ok(self.tokenizer.next().expect("We peek in check"))
 		} else {
 			Ok(None)
 		}
 	}
 
-	fn peek_check_and_consume(&mut self, data_kind: &TokenData) -> Result<Option<Token>> {
+	fn peek_check_and_consume(&mut self, data_tag: TokenDataTag) -> Result<Option<Token>> {
 		let i = self.peek_newlines()?;
 		if let Some(t) = self.tokenizer.peek_n(i)? {
-			if data_kind.eq_kind(&t.data) {
+			if data_tag == t.data.tag() {
 				self.flush_peeked_newlines();
 				return Ok(self.tokenizer.next().expect("We already peeked"));
 			}
@@ -593,27 +562,27 @@ impl<'a> Parser<'a> {
 		return Ok(None);
 	}
 
-	fn expect(&mut self, data_kind: &TokenData, err: impl Into<String>) -> Result<Token> {
+	fn expect(&mut self, data_tag: TokenDataTag, err: impl Into<String>) -> Result<Token> {
 		let next = self
 			.tokenizer
 			.next()?
 			.ok_or(Error::SimpleErr("Unexpected end of file."))?;
-		if !next.data.eq_kind(data_kind) {
+		if next.data.tag() != data_tag {
 			ErrAt(next.location, err.into())
 		} else {
 			Ok(next)
 		}
 	}
 
-	fn skip_expect(&mut self, data_kind: &TokenData, err: impl Into<String>) -> Result<Token> {
+	fn skip_expect(&mut self, data_tag: TokenDataTag, err: impl Into<String>) -> Result<Token> {
 		self.skip_newlines()?;
-		self.expect(data_kind, err)
+		self.expect(data_tag, err)
 	}
 
-	fn peek_expect(&mut self, data_kind: &TokenData, err: impl Into<String>) -> Result<Token> {
+	fn peek_expect(&mut self, data_tag: TokenDataTag, err: impl Into<String>) -> Result<Token> {
 		let i = self.peek_newlines()?;
 		if let Some(t) = self.tokenizer.peek_n(i)? {
-			if t.data.eq_kind(data_kind) {
+			if t.data.tag() == data_tag {
 				ErrAt(t.location.clone(), err.into())
 			} else {
 				self.flush_peeked_newlines();
@@ -690,7 +659,7 @@ impl<'a> Parser<'a> {
 
 impl<'a> Parser<'a> {
 	fn parse_declaration(&mut self) -> Result<usize> {
-		if self.check(&TokenData::Def)? {
+		if self.check(TokenDataTag::Def)? {
 			self.parse_def()
 		} else {
 			self.parse_statement()
@@ -764,7 +733,7 @@ impl<'a> Parser<'a> {
 			LeftParen => {
 				let idx = self.parse_expression()?;
 				self.expect(
-					&TokenData::RightParen,
+					TokenDataTag::RightParen,
 					format!(
 						"Expected `{}` to terminate parenthesised expression.",
 						TokenData::RightParen
@@ -852,21 +821,21 @@ impl<'a> Parser<'a> {
 
 		let block_location = self
 			.skip_expect(
-				&TokenData::LeftCurly,
+				TokenDataTag::LeftCurly,
 				format!("Expected `{}` to begin block.", TokenData::LeftCurly),
 			)?
 			.location;
 
 		loop {
 			self.skip_newlines()?;
-			if self.check(&TokenData::RightCurly)? || self.check_eof()? {
+			if self.check(TokenDataTag::RightCurly)? || self.check_eof()? {
 				break;
 			}
 			roots.push(self.parse_declaration()?);
 		}
 
 		self.expect(
-			&TokenData::RightCurly,
+			TokenDataTag::RightCurly,
 			format!("Expected `{}` to terminate block.", TokenData::RightCurly),
 		)?;
 
@@ -885,8 +854,8 @@ impl<'a> Parser<'a> {
 		let condition = self.parse_expression()?;
 
 		let then_block = self.parse_block(BlockKind::Block)?;
-		let else_block = if self.peek_check_and_consume(&TokenData::Else)?.is_some() {
-			if self.skip_check(&TokenData::If)? {
+		let else_block = if self.peek_check_and_consume(TokenDataTag::Else)?.is_some() {
+			if self.skip_check(TokenDataTag::If)? {
 				let if_token = self
 					.tokenizer
 					.next()
@@ -936,7 +905,7 @@ impl<'a> Parser<'a> {
 			.location;
 
 		let ident = self.expect(
-			&TokenData::Ident(String::new()),
+			TokenDataTag::Ident,
 			format!("Expected an identifer after keyword `{}`.", TokenData::Def),
 		)?;
 
@@ -953,7 +922,7 @@ impl<'a> Parser<'a> {
 		let ident = self.ast.add_string(ident);
 
 		self.expect(
-			&TokenData::LeftParen,
+			TokenDataTag::LeftParen,
 			format!(
 				"Expected `{}` to begin parameter list.",
 				TokenData::LeftParen
@@ -963,11 +932,11 @@ impl<'a> Parser<'a> {
 		let mut param_idents = Vec::new();
 		let mut param_location = None;
 		loop {
-			if self.check(&TokenData::RightParen)? || self.check_eof()? {
+			if self.check(TokenDataTag::RightParen)? || self.check_eof()? {
 				break;
 			}
 
-			let token = self.expect(&TokenData::Ident(String::new()), "Expected parameter name.")?;
+			let token = self.expect(TokenDataTag::Ident, "Expected parameter name.")?;
 
 			if param_location.is_none() {
 				param_location = Some(token.location);
@@ -980,7 +949,7 @@ impl<'a> Parser<'a> {
 				unreachable!();
 			}
 
-			if !self.check_and_consume(&TokenData::Comma)?.is_some() || self.check_eof()? {
+			if !self.check_and_consume(TokenDataTag::Comma)?.is_some() || self.check_eof()? {
 				break;
 			}
 		}
@@ -998,7 +967,7 @@ impl<'a> Parser<'a> {
 		};
 
 		self.expect(
-			&TokenData::RightParen,
+			TokenDataTag::RightParen,
 			format!(
 				"Expected `{}` to terminate parameter list.",
 				TokenData::RightParen
