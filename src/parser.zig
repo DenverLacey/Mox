@@ -165,6 +165,42 @@ pub const TokenData = union(TokenKind) {
     Else,
     While,
     Def,
+
+    const Self = @This();
+
+    pub fn format(self: *const Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try writer.print("{s} {{ ", .{@typeName(Self)});
+        switch (self.*) {
+            // Literals
+            .Bool => |value| try writer.print(".Bool = {}", .{value}),
+            .Int => |value| try writer.print(".Int = {}", .{value}),
+            .Num => |value| try writer.print(".Num = {}", .{value}),
+            .Str => |str| try writer.print(".Str = {s}", .{str}),
+            .Ident => |id| try writer.print(".Ident = {s}", .{id}),
+
+            // Delimeters
+            .Newline => _ = try writer.write(".Newline"),
+            .Comma => _ = try writer.write(".Comma"),
+            .Semicolon => _ = try writer.write(".Semicolon"),
+            .LeftParen => _ = try writer.write(".LeftParen"),
+            .RightParen => _ = try writer.write(".RightParen"),
+            .LeftCurly => _ = try writer.write(".LeftCurly"),
+            .RightCurly => _ = try writer.write(".RightCurly"),
+
+            // Operators
+            .Plus => _ = try writer.write(".Plus"),
+            .Dash => _ = try writer.write(".Dash"),
+            .Star => _ = try writer.write(".Star"),
+            .Slash => _ = try writer.write(".Slash"),
+
+            // Keywords
+            .If => _ = try writer.write(".If"),
+            .Else => _ = try writer.write(".Else"),
+            .While => _ = try writer.write(".While"),
+            .Def => _ = try writer.write(".Def"),
+        }
+        _ = try writer.write(" }");
+    }
 };
 
 const TokenPrecedence = enum {
@@ -195,9 +231,8 @@ const TokenPrecedence = enum {
 };
 
 pub const ParseError = error{
-    // Tokenizer Errors
-    UnendedStringLiteral,
-    UnknownOperator,
+    TokenizerError,
+    ParserError,
 };
 
 pub const Tokenizer = struct {
@@ -477,7 +512,7 @@ pub const Tokenizer = struct {
                 }
                 end_index = self.source.i;
             } else {
-                return raise(ParseError.UnendedStringLiteral, self.token_location, "Unended string literal.", &self.err_msg);
+                return raise(ParseError.TokenizerError, self.token_location, "Unended string literal.", &self.err_msg);
             }
         }
 
@@ -518,7 +553,7 @@ pub const Tokenizer = struct {
             '-' => Token.init(TokenData.Dash, self.token_location),
             '*' => Token.init(TokenData.Star, self.token_location),
             '/' => Token.init(TokenData.Slash, self.token_location),
-            else => raise(ParseError.UnknownOperator, self.token_location, try std.fmt.allocPrint(self.allocator, "Unknown operator `{u}`", .{c}), &self.err_msg),
+            else => raise(ParseError.TokenizerError, self.token_location, try std.fmt.allocPrint(self.allocator, "Unknown operator `{u}`", .{c}), &self.err_msg),
         };
     }
 };

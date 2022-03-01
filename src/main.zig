@@ -23,16 +23,10 @@ pub fn main() !void {
     var gpa = Gpa{};
 
     var tokenizer = try Tokenizer.init(source, "<SOURCE>", gpa.allocator());
-    while (true) {
-        const next = tokenizer.next() catch {
-            std.debug.print("{}\n", .{tokenizer.err_msg});
-            break;
-        };
-
-        if (next) |token| {
-            std.debug.print("{?}\n", .{token});
-        } else {
-            break;
-        }
+    while (tokenizer.next() catch blk: {
+        std.debug.print("{}\n", .{tokenizer.err_msg});
+        break :blk null;
+    }) |token| {
+        std.debug.print("{?}\n", .{token});
     }
 }
