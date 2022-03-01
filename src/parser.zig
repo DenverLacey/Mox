@@ -1,8 +1,13 @@
 const std = @import("std");
+const err = @import("error.zig");
+
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const Utf8View = std.unicode.Utf8View;
 const Utf8Iterator = std.unicode.Utf8Iterator;
+
+const ErrMsg = err.ErrMsg;
+const raise = err.raise;
 
 pub const CodeLocation = struct {
     line: usize,
@@ -196,6 +201,7 @@ pub const ParseError = error{
 };
 
 pub const Tokenizer = struct {
+    allocator: Allocator,
     source: Utf8Iterator,
     filename: []const u8,
     peeked_tokens: ArrayList(Token),
@@ -205,11 +211,14 @@ pub const Tokenizer = struct {
     column: usize,
     token_location: CodeLocation,
 
+    err_msg: ErrMsg,
+
     const Self = @This();
     const Char = u21;
 
     pub fn init(source: []const u8, filename: []const u8, allocator: Allocator) !Self {
         return Self{
+            .allocator = allocator,
             .source = (try Utf8View.init(source)).iterator(),
             .filename = filename,
             .peeked_tokens = ArrayList(Token).init(allocator),
@@ -217,6 +226,7 @@ pub const Tokenizer = struct {
             .line = 0,
             .column = 0,
             .token_location = CodeLocation.init(0, 0, filename),
+            .err_msg = ErrMsg{ .loc = CodeLocation.init(0, 0, ""), .msg = "" },
         };
     }
 
@@ -355,14 +365,14 @@ pub const Tokenizer = struct {
         return self.peeked_tokens.items[n];
     }
 
-    pub fn next(self: *Self) ParseError!?Token {
+    pub fn next(self: *Self) !?Token {
         if (self.peeked_tokens.items.len != 0) {
             return self.peeked_tokens.orderedRemove(0);
         }
         return try self.nextNoPeeking();
     }
 
-    fn nextNoPeeking(self: *Self) ParseError!?Token {
+    fn nextNoPeeking(self: *Self) !?Token {
         self.skipToBeginningOfNextToken();
         self.recordTokenLocation();
         self.previous_was_newline = false;
@@ -385,7 +395,7 @@ pub const Tokenizer = struct {
                 token = try self.tokenizePunctuation();
             }
         } else {
-            return null;
+            token = null;
         }
 
         return token;
@@ -467,7 +477,7 @@ pub const Tokenizer = struct {
                 }
                 end_index = self.source.i;
             } else {
-                return ParseError.UnendedStringLiteral;
+                return raise(ParseError.UnendedStringLiteral, self.token_location, "Unended string literal.", &self.err_msg);
             }
         }
 
@@ -495,8 +505,9 @@ pub const Tokenizer = struct {
             Token.init(TokenData{ .Ident = word }, self.token_location);
     }
 
-    fn tokenizePunctuation(self: *Self) ParseError!Token {
-        return switch (self.nextChar().?) {
+    fn tokenizePunctuation(self: *Self) !Token {
+        const c = self.nextChar().?;
+        return switch (c) {
             ',' => Token.init(TokenData.Comma, self.token_location),
             ';' => Token.init(TokenData.Semicolon, self.token_location),
             '(' => Token.init(TokenData.LeftParen, self.token_location),
@@ -507,7 +518,7 @@ pub const Tokenizer = struct {
             '-' => Token.init(TokenData.Dash, self.token_location),
             '*' => Token.init(TokenData.Star, self.token_location),
             '/' => Token.init(TokenData.Slash, self.token_location),
-            else => ParseError.UnknownOperator,
+            else => raise(ParseError.UnknownOperator, self.token_location, try std.fmt.allocPrint(self.allocator, "Unknown operator `{u}`", .{c}), &self.err_msg),
         };
     }
 };
