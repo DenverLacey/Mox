@@ -8,7 +8,11 @@ const CodeLocation = parser.CodeLocation;
 
 pub fn main() !void {
     const source =
-        \\1 + 2
+        \\if a + 1 {
+        \\	"Hello"	
+        \\} else {
+        \\	"Goodbye"
+        \\}
         \\
     ;
 
@@ -16,7 +20,6 @@ pub fn main() !void {
     var gpa = Gpa{};
 
     var tokenizer = try Tokenizer.init(source, "<SOURCE>", gpa.allocator());
-
     while (try tokenizer.next()) |token| {
         std.debug.print("{?}\n", .{token});
     }

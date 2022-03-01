@@ -16,7 +16,7 @@ pub const CodeLocation = struct {
     }
 
     pub fn format(self: *const Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try writer.print("{}:{}:{s}", .{ self.line, self.col, self.file });
+        try writer.print("{}:{}:{s}", .{ self.line + 1, self.col + 1, self.file });
     }
 };
 
@@ -184,12 +184,12 @@ const TokenPrecedence = enum {
 
     fn next(self: TokenPrecedence) TokenPrecedence {
         const primary: u8 = @enumToInt(TokenPrecedence.Primary);
-        var p = @enumToInt(self);
+        const p = @enumToInt(self);
         return @intToEnum(TokenPrecedence, if (p + 1 > primary) primary else p + 1);
     }
 };
 
-const ParseError = error{
+pub const ParseError = error{
     // Tokenizer Errors
     UnendedStringLiteral,
     UnknownOperator,
@@ -213,7 +213,7 @@ pub const Tokenizer = struct {
             .source = (try Utf8View.init(source)).iterator(),
             .filename = filename,
             .peeked_tokens = ArrayList(Token).init(allocator),
-            .previous_was_newline = true, // to skip leading newlinse in source file
+            .previous_was_newline = true, // to skip leading newlines in source file
             .line = 0,
             .column = 0,
             .token_location = CodeLocation.init(0, 0, filename),
@@ -332,7 +332,7 @@ pub const Tokenizer = struct {
         return self.nextChar();
     }
 
-    pub fn peek(self: *Self) ParseError!?Token {
+    pub fn peek(self: *Self) !?Token {
         if (self.peeked_tokens.items.len == 0) {
             const maybe_token = try self.next();
             if (maybe_token) |t| {
@@ -344,7 +344,7 @@ pub const Tokenizer = struct {
         return self.peeked_tokens.items[0];
     }
 
-    pub fn peekN(self: *Self, n: usize) ParseError!?Token {
+    pub fn peekN(self: *Self, n: usize) !?Token {
         while (self.peeked_tokens.items.len <= n) {
             if (try self.nextNoPeeking()) |t| {
                 try self.peeked_tokens.append(t);
@@ -367,23 +367,28 @@ pub const Tokenizer = struct {
         self.recordTokenLocation();
         self.previous_was_newline = false;
 
-        return if (self.peekChar()) |c|
-            if (c == 0)
-                null
-            else if (c == '\n') blk: {
+        var token: ?Token = undefined;
+        if (self.peekChar()) |c| {
+            if (c == 0) {
+                token = null;
+            } else if (c == '\n') {
                 self.previous_was_newline = true;
                 _ = self.nextChar();
-                break :blk Token.init(TokenData.Newline, self.token_location);
-            } else if (isDigit(c))
-                self.tokenizeNumber()
-            else if (isStringBegin(c))
-                try self.tokenizeString()
-            else if (isIdentBegin(c))
-                self.tokenizeIdentOrKeyword()
-            else
-                try self.tokenizePunctuation()
-        else
-            null;
+                token = Token.init(TokenData.Newline, self.token_location);
+            } else if (isDigit(c)) {
+                token = self.tokenizeNumber();
+            } else if (isStringBegin(c)) {
+                token = try self.tokenizeString();
+            } else if (isIdentBegin(c)) {
+                token = self.tokenizeIdentOrKeyword();
+            } else {
+                token = try self.tokenizePunctuation();
+            }
+        } else {
+            return null;
+        }
+
+        return token;
     }
 
     fn skipToBeginningOfNextToken(self: *Self) void {
@@ -419,32 +424,32 @@ pub const Tokenizer = struct {
         }
     }
 
-    // fn tokenizeNumber(self: *Self) Token {
-    //     const start_index = self.source.i;
-    //     var end_index: usize = start_index;
-    //     while (self.nextCharIf(isDigit)) |_| {
-    //         end_index = self.source.i;
-    //     }
+    fn tokenizeNumber(self: *Self) Token {
+        const start_index = self.source.i;
+        var end_index: usize = start_index;
+        while (self.nextCharIf(isDigit)) |_| {
+            end_index = self.source.i;
+        }
 
-    //     const reset_index = self.source.i;
-    //     if (self.nextCharIfEqual('.')) |_| {
-    //         if (self.peekChar()) |c| {
-    //             if (!isDigit(c)) {
-    //                 self.source.i = reset_index;
-    //             } else {
-    //                 while (self.nextCharIf(isDigit)) |_| {
-    //                     end_index = self.source.i;
-    //                 }
+        const reset_index = self.source.i;
+        if (self.nextCharIfEqual('.')) |_| {
+            if (self.peekChar()) |c| {
+                if (!isDigit(c)) {
+                    self.source.i = reset_index;
+                } else {
+                    while (self.nextCharIf(isDigit)) |_| {
+                        end_index = self.source.i;
+                    }
 
-    //                 const word = self.source.bytes[start_index..end_index];
-    //                 return Token.init(TokenData{ .Num = std.fmt.parseFloat(f64, word) catch unreachable }, self.token_location);
-    //             }
-    //         }
-    //     }
+                    const word = self.source.bytes[start_index..end_index];
+                    return Token.init(TokenData{ .Num = std.fmt.parseFloat(f64, word) catch unreachable }, self.token_location);
+                }
+            }
+        }
 
-    //     const word = self.source.bytes[start_index..end_index];
-    //     return Token.init(TokenData{ .Int = std.fmt.parseInt(i64, word, 10) catch unreachable }, self.token_location);
-    // }
+        const word = self.source.bytes[start_index..end_index];
+        return Token.init(TokenData{ .Int = std.fmt.parseInt(i64, word, 10) catch unreachable }, self.token_location);
+    }
 
     // @TODO:
     // Handled escape sequences.
