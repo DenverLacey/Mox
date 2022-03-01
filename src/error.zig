@@ -5,16 +5,20 @@ pub const ErrMsg = struct {
     loc: ?CodeLocation,
     msg: []const u8,
 
-    const Self = @This();
+    const This = @This();
 
-    pub fn format(self: *const Self, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    pub fn default() This {
+        return This{ .loc = null, .msg = "" };
+    }
+
+    pub fn format(this: *const This, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
         if (std.mem.eql(u8, fmt, "?")) {
             unreachable;
         } else {
-            if (self.loc) |loc| {
-                try writer.print("{}: Error: {s}", .{ loc, self.msg });
+            if (this.loc) |loc| {
+                try writer.print("{}: Error: {s}", .{ loc, this.msg });
             } else {
-                try writer.print("Error: {s}", .{self.msg});
+                try writer.print("Error: {s}", .{this.msg});
             }
         }
     }
@@ -23,4 +27,16 @@ pub const ErrMsg = struct {
 pub fn raise(err: anytype, loc: ?CodeLocation, msg: []const u8, out: *ErrMsg) @TypeOf(err) {
     out.* = ErrMsg{ .loc = loc, .msg = msg };
     return err;
+}
+
+pub fn todo(msg: []const u8) noreturn {
+    std.debug.print("Todo: {s}\n", .{msg});
+    std.debug.assert(false);
+}
+
+pub const TodoError = error{Todo};
+
+pub fn todoAsErr(msg: []const u8) TodoError {
+    std.debug.print("Todo: {s}\n", .{msg});
+    return TodoError.Todo;
 }
