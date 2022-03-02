@@ -13,6 +13,9 @@ const AstIdent = ast.AstIdent;
 const AstLiteral = ast.AstLiteral;
 const AstUnary = ast.AstUnary;
 const AstBinary = ast.AstBinary;
+const AstBlock = ast.AstBlock;
+const AstIf = ast.AstIf;
+const AstWhile = ast.AstWhile;
 
 const ErrMsg = err.ErrMsg;
 const raise = err.raise;
@@ -30,7 +33,7 @@ pub const CodeLocation = struct {
     }
 
     pub fn format(this: *const This, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try writer.print("{}:{}:{s}", .{ this.line + 1, this.col + 1, this.file });
+        try writer.print("{s}:{}:{}", .{ this.file, this.line + 1, this.col + 1 });
     }
 };
 
@@ -615,7 +618,7 @@ pub const Parser = struct {
     }
 
     fn checkEof(this: *This) !bool {
-        return try this.tokenizer.peek() == null;
+        return (try this.tokenizer.peek()) == null;
     }
 
     fn skipCheckEof(this: *This) !bool {
@@ -625,7 +628,7 @@ pub const Parser = struct {
 
     fn peekCheckEof(this: *This) !bool {
         const i = try this.peekNewlines();
-        return try this.tokenizer.peekN(i) == null;
+        return (try this.tokenizer.peekN(i)) == null;
     }
 
     fn match(this: *This, kind: TokenKind) !?Token {
@@ -714,10 +717,10 @@ pub const Parser = struct {
 
     fn flushPeekedNewlines(this: *This) void {
         while (true) {
-            if (this.tokenizer.peeked_tokens.len == 0 or this.tokenizer.peeked_tokens[0].data != .Newline) {
+            if (this.tokenizer.peeked_tokens.items.len == 0 or this.tokenizer.peeked_tokens.items[0].data != .Newline) {
                 break;
             }
-            this.tokenizer.peeked_tokens.orderedRemove(0);
+            _ = this.tokenizer.peeked_tokens.orderedRemove(0);
         }
     }
 
@@ -741,11 +744,11 @@ pub const Parser = struct {
         }
     }
 
-    fn parseExpressionOrAssignment(this: *This) !*Ast {
+    fn parseExpressionOrAssignment(this: *This) anyerror!*Ast {
         return this.parsePrecedence(.Assignment);
     }
 
-    fn parseExpression(this: *This) !*Ast {
+    fn parseExpression(this: *This) anyerror!*Ast {
         const node = try this.parseExpressionOrAssignment();
         if (node.kind == .Assign) {
             return raise(ParseError.ParserError, node.token.location, "Cannot assign in expression context.", &this.err_msg);
@@ -754,7 +757,7 @@ pub const Parser = struct {
         return node;
     }
 
-    fn parsePrecedence(this: *This, precedence: TokenPrecedence) !*Ast {
+    fn parsePrecedence(this: *This, precedence: TokenPrecedence) anyerror!*Ast {
         const maybe_token = try this.tokenizer.next();
         if (maybe_token == null) {
             return raise(ParseError.ParserError, this.tokenizer.currentLocation(), "Unexpected end of file.", &this.err_msg);
@@ -801,7 +804,9 @@ pub const Parser = struct {
 
             // Delimeters
             .LeftParen => {
-                return todoAsErr(".LeftParen branch of parsePrefix not yet implemented.");
+                const expr = try this.parseExpression();
+                _ = try this.expect(.RightParen, "Expected `)` to terminate parenthesized expression.");
+                return expr;
             },
 
             // Operators
@@ -811,10 +816,10 @@ pub const Parser = struct {
 
             // Keywords
             .If => {
-                return this.parseIf(token);
+                return (try this.parseIf(token)).asAst();
             },
             .While => {
-                return this.parseWhile(token);
+                return (try this.parseWhile(token)).asAst();
             },
 
             else => {
@@ -869,22 +874,54 @@ pub const Parser = struct {
         return node;
     }
 
-    fn parseBlock(_: *This, _: AstKind) !*Ast
-    // !*AstBlock
-    {
-        return todoAsErr("parseBlock not yet implemented.");
+    fn parseBlock(this: *This) anyerror!*AstBlock {
+        var nodes = ArrayList(*Ast).init(this.allocator);
+        const block_token = try this.skipExpect(.LeftCurly, "Expected `{` to begin block.");
+
+        while (true) {
+            try this.skipNewlines();
+            if ((try this.check(.RightCurly)) or (try this.checkEof())) {
+                break;
+            }
+            try nodes.append(try this.parseDeclaration());
+        }
+
+        _ = try this.expect(.RightCurly, "Expected `}` to terminate block.");
+
+        var block = try this.allocator.create(AstBlock);
+        block.* = AstBlock.init(.Block, block_token, nodes.items);
+
+        return block;
     }
 
-    fn parseIf(_: *This, _: Token) !*Ast
-    // !*AstIf
-    {
-        return todoAsErr("parseIf not yet implemented.");
+    fn parseIf(this: *This, token: Token) anyerror!*AstIf {
+        try this.skipNewlines();
+        const condition = try this.parseExpression();
+
+        const then_block = try this.parseBlock();
+        const else_block = if ((try this.peekMatch(.Else)) != null)
+            if (try this.skipCheck(.If))
+                (try this.parseIf((this.tokenizer.next() catch unreachable).?)).asAst()
+            else
+                (try this.parseBlock()).asAst()
+        else
+            null;
+
+        var node = try this.allocator.create(AstIf);
+        node.* = AstIf.init(.If, token, condition, then_block, else_block);
+
+        return node;
     }
 
-    fn parseWhile(_: *This, _: Token) !*Ast
-    // !*AstIf
-    {
-        return todoAsErr("parseWhile not yet implemented.");
+    fn parseWhile(this: *This, token: Token) anyerror!*AstWhile {
+        try this.skipNewlines();
+        const condition = try this.parseExpression();
+        const block = try this.parseBlock();
+
+        var node = try this.allocator.create(AstWhile);
+        node.* = AstWhile.init(.While, token, condition, block);
+
+        return node;
     }
 
     fn parseDef(_: *This) !*Ast

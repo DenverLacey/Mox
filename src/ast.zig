@@ -31,6 +31,12 @@ pub const Ast = struct {
 
             // Binary
             .Assign, .Add, .Subtract, .Multiply, .Divide => try writer.print("{}", .{this.downcastConst(AstBinary)}),
+
+            // Blocks
+            .Block => try writer.print("{}", .{this.downcastConst(AstBlock)}),
+
+            .If => try writer.print("{}", .{this.downcastConst(AstIf)}),
+            .While => try writer.print("{}", .{this.downcastConst(AstWhile)}),
         }
     }
 };
@@ -52,6 +58,12 @@ pub const AstKind = enum {
     Subtract,
     Multiply,
     Divide,
+
+    // Blocks
+    Block,
+
+    If,
+    While,
 };
 
 pub const AstLiteral = struct {
@@ -119,6 +131,61 @@ pub const AstBinary = struct {
 
     pub fn init(kind: AstKind, token: Token, lhs: *Ast, rhs: *Ast) This {
         return This{ .kind = kind, .token = token, .lhs = lhs, .rhs = rhs };
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
+pub const AstBlock = struct {
+    kind: AstKind,
+    token: Token,
+    nodes: []*Ast,
+
+    const This = @This();
+
+    pub fn init(kind: AstKind, token: Token, nodes: []*Ast) This {
+        return This{ .kind = kind, .token = token, .nodes = nodes };
+    }
+
+    pub fn deinit(this: *This, allocator: std.mem.Allocator) void {
+        allocator.free(this.nodes);
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
+pub const AstIf = struct {
+    kind: AstKind,
+    token: Token,
+    condition: *Ast,
+    then_block: *AstBlock,
+    else_block: ?*Ast,
+
+    const This = @This();
+
+    pub fn init(kind: AstKind, token: Token, condition: *Ast, then_block: *AstBlock, else_block: ?*Ast) This {
+        return This{ .kind = kind, .token = token, .condition = condition, .then_block = then_block, .else_block = else_block };
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
+pub const AstWhile = struct {
+    kind: AstKind,
+    token: Token,
+    condition: *Ast,
+    block: *AstBlock,
+
+    const This = @This();
+
+    pub fn init(kind: AstKind, token: Token, condition: *Ast, block: *AstBlock) This {
+        return This{ .kind = kind, .token = token, .condition = condition, .block = block };
     }
 
     pub fn asAst(this: *This) *Ast {
