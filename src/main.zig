@@ -7,12 +7,6 @@ const err = @import("error.zig");
 const ErrMsg = err.ErrMsg;
 
 pub fn main() !void {
-    // const source =
-    //     \\1 * 2 + 3 / 4;
-    //     \\-5
-    //     \\
-    // ;
-
     const Gpa = std.heap.GeneralPurposeAllocator(.{});
     var gpa = Gpa{};
     var allocator = gpa.allocator();

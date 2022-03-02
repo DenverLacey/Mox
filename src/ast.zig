@@ -33,10 +33,11 @@ pub const Ast = struct {
             .Assign, .Add, .Subtract, .Multiply, .Divide => try writer.print("{}", .{this.downcastConst(AstBinary)}),
 
             // Blocks
-            .Block => try writer.print("{}", .{this.downcastConst(AstBlock)}),
+            .Block, .Comma => try writer.print("{}", .{this.downcastConst(AstBlock)}),
 
             .If => try writer.print("{}", .{this.downcastConst(AstIf)}),
             .While => try writer.print("{}", .{this.downcastConst(AstWhile)}),
+            .Def => try writer.print("{}", .{this.downcastConst(AstDef)}),
         }
     }
 };
@@ -61,9 +62,11 @@ pub const AstKind = enum {
 
     // Blocks
     Block,
+    Comma,
 
     If,
     While,
+    Def,
 };
 
 pub const AstLiteral = struct {
@@ -186,6 +189,24 @@ pub const AstWhile = struct {
 
     pub fn init(kind: AstKind, token: Token, condition: *Ast, block: *AstBlock) This {
         return This{ .kind = kind, .token = token, .condition = condition, .block = block };
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
+pub const AstDef = struct {
+    kind: AstKind,
+    token: Token,
+    name: []const u8,
+    params: *AstBlock,
+    body: *AstBlock,
+
+    const This = @This();
+
+    pub fn init(token: Token, name: []const u8, params: *AstBlock, body: *AstBlock) This {
+        return This{ .kind = .Def, .token = token, .name = name, .params = params, .body = body };
     }
 
     pub fn asAst(this: *This) *Ast {

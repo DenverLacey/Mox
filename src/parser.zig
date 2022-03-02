@@ -16,6 +16,7 @@ const AstBinary = ast.AstBinary;
 const AstBlock = ast.AstBlock;
 const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
+const AstDef = ast.AstDef;
 
 const ErrMsg = err.ErrMsg;
 const raise = err.raise;
@@ -725,8 +726,8 @@ pub const Parser = struct {
     }
 
     fn parseDeclaration(this: *This) !*Ast {
-        return if (try this.check(.Def))
-            this.parseDef()
+        return if (try this.match(.Def)) |token|
+            (try this.parseDef(token)).asAst()
         else
             this.parseStatement();
     }
@@ -924,10 +925,48 @@ pub const Parser = struct {
         return node;
     }
 
-    fn parseDef(_: *This) !*Ast
-    // !*AstIf
-    {
-        return todoAsErr("parseDef not yet implemented.");
+    fn parseDef(this: *This, token: Token) anyerror!*AstDef {
+        const ident_token = try this.expect(.Ident, "Expected an identifer after keyword `def`.");
+        const ident = switch (ident_token.data) {
+            .Ident => |id| id,
+            else => unreachable,
+        };
+
+        _ = try this.expect(.LeftParen, "Expected `(` to begin parameter list.");
+
+        var param_nodes = ArrayList(*Ast).init(this.allocator);
+        while (true) {
+            if ((try this.check(.RightParen)) or (try this.checkEof())) {
+                break;
+            }
+
+            const param_token = try this.expect(.Ident, "Expected parameter name.");
+            const param_name = switch (param_token.data) {
+                .Ident => |id| id,
+                else => unreachable,
+            };
+
+            var param_ident = try this.allocator.create(AstIdent);
+            param_ident.* = AstIdent.init(param_token, param_name);
+
+            try param_nodes.append(param_ident.asAst());
+
+            if ((try this.match(.Comma)) == null or (try this.checkEof())) {
+                break;
+            }
+        }
+
+        var params = try this.allocator.create(AstBlock);
+        params.* = AstBlock.init(.Comma, token, param_nodes.items);
+
+        _ = try this.expect(.RightParen, "Expected `)` to terminate parameter list.");
+
+        const body = try this.parseBlock();
+
+        var node = try this.allocator.create(AstDef);
+        node.* = AstDef.init(token, ident, params, body);
+
+        return node;
     }
 
     pub fn parse(this: *This) !ArrayList(*Ast) {
