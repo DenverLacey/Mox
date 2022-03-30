@@ -3,6 +3,9 @@ const std = @import("std");
 const parser = @import("parser.zig");
 const Parser = parser.Parser;
 
+const evaluator = @import("evaluator.zig");
+const Evaluator = evaluator.Evaluator;
+
 const err = @import("error.zig");
 const ErrMsg = err.ErrMsg;
 
@@ -47,4 +50,21 @@ pub fn main() !void {
     for (nodes.items) |node| {
         std.debug.print("{}\n\n", .{node});
     }
+
+    var e = try Evaluator.init(allocator);
+    defer e.deinit();
+
+    e.evaluate(nodes) catch |err| {
+        switch (err) {
+            error.InvalidOperation, error.TypeMismatch => {
+                const err_msg = e.err_msg;
+                std.debug.print("{}\n", .{err_msg});
+            },
+            else => {
+                std.debug.print("Error: {}\n", .{err});
+            },
+        }
+
+        return;
+    };
 }

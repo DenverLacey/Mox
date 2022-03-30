@@ -556,7 +556,11 @@ const Tokenizer = struct {
         }
         const word = this.source.bytes[start_index..end_index];
 
-        return if (std.mem.eql(u8, word, "if"))
+        return if (std.mem.eql(u8, word, "true"))
+            Token.init(TokenData{ .Bool = true }, this.token_location)
+        else if (std.mem.eql(u8, word, "false"))
+            Token.init(TokenData{ .Bool = false }, this.token_location)
+        else if (std.mem.eql(u8, word, "if"))
             Token.init(TokenData.If, this.token_location)
         else if (std.mem.eql(u8, word, "else"))
             Token.init(TokenData.Else, this.token_location)

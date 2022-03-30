@@ -32,6 +32,7 @@ pub fn raise(err: anytype, loc: ?CodeLocation, msg: []const u8, out: *ErrMsg) @T
 pub fn todo(msg: []const u8) noreturn {
     std.debug.print("Todo: {s}\n", .{msg});
     std.debug.assert(false);
+    while (true) {}
 }
 
 pub const TodoError = error{Todo};
