@@ -17,6 +17,7 @@ const AstBlock = ast.AstBlock;
 const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
 const AstDef = ast.AstDef;
+const AstVar = ast.AstVar;
 
 const ErrMsg = err.ErrMsg;
 const raise = err.raise;
@@ -813,6 +814,7 @@ pub const Parser = struct {
                 _ = try this.expect(.RightParen, "Expected `)` to terminate parenthesized expression.");
                 return expr;
             },
+            .LeftCurly => return (try this.parseBlockNoExpect(token)).asAst(),
 
             // Operators
             .Dash => {
@@ -825,6 +827,9 @@ pub const Parser = struct {
             },
             .While => {
                 return (try this.parseWhile(token)).asAst();
+            },
+            .Var => {
+                return (try this.parseVar(token)).asAst();
             },
 
             else => {
@@ -847,6 +852,9 @@ pub const Parser = struct {
             },
             .Slash => {
                 return (try this.parseBinary(prec, .Divide, token, previous)).asAst();
+            },
+            .Equal => {
+                return (try this.parseBinary(prec, .Assign, token, previous)).asAst();
             },
 
             else => {
@@ -880,8 +888,12 @@ pub const Parser = struct {
     }
 
     fn parseBlock(this: *This) anyerror!*AstBlock {
-        var nodes = ArrayList(*Ast).init(this.allocator);
         const block_token = try this.skipExpect(.LeftCurly, "Expected `{` to begin block.");
+        return this.parseBlockNoExpect(block_token);
+    }
+
+    fn parseBlockNoExpect(this: *This, token: Token) anyerror!*AstBlock {
+        var nodes = ArrayList(*Ast).init(this.allocator);
 
         while (true) {
             try this.skipNewlines();
@@ -894,9 +906,21 @@ pub const Parser = struct {
         _ = try this.expect(.RightCurly, "Expected `}` to terminate block.");
 
         var block = try this.allocator.create(AstBlock);
-        block.* = AstBlock.init(.Block, block_token, nodes.items);
+        block.* = AstBlock.init(.Block, token, nodes.items);
 
         return block;
+    }
+
+    fn parseIdent(this: *This) std.mem.Allocator.Error!?*AstIdent {
+        const ident_token = this.expect(.Ident, "") catch return null;
+        switch (ident_token.data) {
+            .Ident => |ident| {
+                var node = try this.allocator.create(AstIdent);
+                node.* = AstIdent.init(ident_token, ident);
+                return node;
+            },
+            else => unreachable,
+        }
     }
 
     fn parseIf(this: *This, token: Token) anyerror!*AstIf {
@@ -925,6 +949,22 @@ pub const Parser = struct {
 
         var node = try this.allocator.create(AstWhile);
         node.* = AstWhile.init(.While, token, condition, block);
+
+        return node;
+    }
+
+    fn parseVar(this: *This, token: Token) anyerror!*AstVar {
+        try this.skipNewlines();
+        const ident = (try this.parseIdent()) orelse {
+            return raise(ParseError.ParserError, token.location, "Expected identifier after `var` keyword.", &this.err_msg);
+        };
+
+        _ = try this.expect(.Equal, "Expected `=` before initializer expression of variable declaration.");
+
+        const initializer = try this.parseExpression();
+
+        var node = try this.allocator.create(AstVar);
+        node.* = AstVar.init(token, ident, initializer);
 
         return node;
     }

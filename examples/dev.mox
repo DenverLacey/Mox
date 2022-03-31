@@ -1,26 +1,7 @@
-2 * -3.5
+# This is a comment
 
-# this is a comment
-#a1 + -_1b
-#3 * (4 + 1)
-#
-#if my_bool {
-#	9999
-#} else if 1 {
-#	99.9
-#} else {
-#	666
-#}
-#
-#while my_other_bool {
-#	69240
-#}
-#
-#"\tHellothere!\nI love you"
-#'This is another string"'
-#
-#def add(a, b) {
-#	a + b
-#}
+var a = "Denver"
+var b = a
+a = "Jordan"
 
-# this is another comment
+# This is a comment at the end of the file

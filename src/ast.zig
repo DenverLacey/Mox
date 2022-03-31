@@ -38,6 +38,7 @@ pub const Ast = struct {
             .If => try writer.print("{}", .{this.downcastConst(AstIf)}),
             .While => try writer.print("{}", .{this.downcastConst(AstWhile)}),
             .Def => try writer.print("{}", .{this.downcastConst(AstDef)}),
+            .Var => try writer.print("{}", .{this.downcastConst(AstVar)}),
         }
     }
 };
@@ -67,6 +68,7 @@ pub const AstKind = enum {
     If,
     While,
     Def,
+    Var,
 };
 
 pub const AstLiteral = struct {
@@ -207,6 +209,23 @@ pub const AstDef = struct {
 
     pub fn init(token: Token, name: []const u8, params: *AstBlock, body: *AstBlock) This {
         return This{ .kind = .Def, .token = token, .name = name, .params = params, .body = body };
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
+pub const AstVar = struct {
+    kind: AstKind,
+    token: Token,
+    ident: *AstIdent,
+    initializer: *Ast,
+
+    const This = @This();
+
+    pub fn init(token: Token, ident: *AstIdent, initializer: *Ast) This {
+        return This{ .kind = .Var, .token = token, .ident = ident, .initializer = initializer };
     }
 
     pub fn asAst(this: *This) *Ast {

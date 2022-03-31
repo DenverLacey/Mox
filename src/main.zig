@@ -56,7 +56,7 @@ pub fn main() !void {
 
     e.evaluate(nodes) catch |err| {
         switch (err) {
-            error.InvalidOperation, error.TypeMismatch => {
+            error.RuntimeError => {
                 const err_msg = e.err_msg;
                 std.debug.print("{}\n", .{err_msg});
             },

@@ -8,7 +8,9 @@ pub const Value = union(ValueKind) {
     Num: f64,
     Str: *RefCounted([]const u8),
 
-    pub fn isTrue(this: @This()) bool {
+    const This = @This();
+
+    pub fn isTrue(this: This) bool {
         return switch (this) {
             .None => false,
             .Bool => |value| value,
@@ -18,14 +20,18 @@ pub const Value = union(ValueKind) {
         };
     }
 
-    pub fn dupe(this: @This()) @This() {
+    pub fn isRedCounted(this: This) bool {
+        return this == .Str;
+    }
+
+    pub fn dupe(this: This) This {
         return switch (this) {
             .Str => |rc| Value{ .Str = rc.dupe() },
             else => this,
         };
     }
 
-    pub fn drop(this: @This()) void {
+    pub fn drop(this: This) void {
         switch (this) {
             .Str => |rc| rc.drop(),
             else => {},
@@ -47,7 +53,9 @@ pub fn RefCounted(comptime T: type) type {
         num_references: usize,
         value: T,
 
-        pub fn create(allocator: Allocator, value: T) !*@This() {
+        const This = @This();
+
+        pub fn create(allocator: Allocator, value: T) !*This {
             var rc = try allocator.create(@This());
             rc.allocator = allocator;
             rc.num_references = 1;
@@ -55,12 +63,12 @@ pub fn RefCounted(comptime T: type) type {
             return rc;
         }
 
-        pub fn dupe(this: *@This()) *@This() {
+        pub fn dupe(this: *@This()) *This {
             this.num_references += 1;
             return this;
         }
 
-        pub fn drop(this: *@This()) void {
+        pub fn drop(this: *This) void {
             this.num_references -= 1;
             if (this.num_references == 0) {
                 std.debug.print("DROP!!!\n", .{});
