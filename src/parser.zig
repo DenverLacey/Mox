@@ -1,12 +1,11 @@
 const std = @import("std");
-const ast = @import("ast.zig");
-const err = @import("error.zig");
-
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const Utf8View = std.unicode.Utf8View;
 const Utf8Iterator = std.unicode.Utf8Iterator;
 
+const ast = @import("ast.zig");
 const Ast = ast.Ast;
 const AstKind = ast.AstKind;
 const AstIdent = ast.AstIdent;
@@ -18,9 +17,12 @@ const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
 const AstDef = ast.AstDef;
 const AstVar = ast.AstVar;
+const AstStruct = ast.AstStruct;
 
+const err = @import("error.zig");
 const ErrMsg = err.ErrMsg;
 const raise = err.raise;
+const todo = err.todo;
 const todoAsErr = err.todoAsErr;
 
 pub const CodeLocation = struct {
@@ -66,8 +68,12 @@ pub const Token = struct {
             .RightParen => TokenPrecedence.None,
             .LeftCurly => TokenPrecedence.None,
             .RightCurly => TokenPrecedence.None,
+            .LeftSquare => TokenPrecedence.Call,
+            .RightSquare => TokenPrecedence.None,
 
             // Operators
+            .Bang => TokenPrecedence.Unary,
+            .BangEqual => TokenPrecedence.Equality,
             .Plus => TokenPrecedence.Term,
             .Dash => TokenPrecedence.Term,
             .Star => TokenPrecedence.Factor,
@@ -81,6 +87,7 @@ pub const Token = struct {
             .While => TokenPrecedence.None,
             .Def => TokenPrecedence.None,
             .Var => TokenPrecedence.None,
+            .Struct => TokenPrecedence.None,
         };
     }
 
@@ -105,8 +112,12 @@ pub const Token = struct {
                 .RightParen => try writer.print(")", .{}),
                 .LeftCurly => try writer.print("{{", .{}),
                 .RightCurly => try writer.print("}}", .{}),
+                .LeftSquare => try writer.print("[", .{}),
+                .RightSquare => try writer.print("]", .{}),
 
                 // Operators
+                .Bang => try writer.print("!", .{}),
+                .BangEqual => try writer.print("!=", .{}),
                 .Plus => try writer.print("+", .{}),
                 .Dash => try writer.print("-", .{}),
                 .Star => try writer.print("*", .{}),
@@ -120,6 +131,7 @@ pub const Token = struct {
                 .While => try writer.print("while", .{}),
                 .Def => try writer.print("def", .{}),
                 .Var => try writer.print("var", .{}),
+                .Struct => try writer.print("struct", .{}),
             }
         } else {
             try writer.print("Token {{ .data: {}, .location: {} }}", .{ this.data, this.location });
@@ -143,8 +155,12 @@ pub const TokenKind = enum {
     RightParen,
     LeftCurly,
     RightCurly,
+    LeftSquare,
+    RightSquare,
 
     // Operators
+    Bang,
+    BangEqual,
     Plus,
     Dash,
     Star,
@@ -158,6 +174,7 @@ pub const TokenKind = enum {
     While,
     Def,
     Var,
+    Struct,
 };
 
 pub const TokenData = union(TokenKind) {
@@ -176,8 +193,12 @@ pub const TokenData = union(TokenKind) {
     RightParen,
     LeftCurly,
     RightCurly,
+    LeftSquare,
+    RightSquare,
 
     // Operators
+    Bang,
+    BangEqual,
     Plus,
     Dash,
     Star,
@@ -191,6 +212,7 @@ pub const TokenData = union(TokenKind) {
     While,
     Def,
     Var,
+    Struct,
 
     const This = @This();
 
@@ -212,8 +234,12 @@ pub const TokenData = union(TokenKind) {
             .RightParen => _ = try writer.write(".RightParen"),
             .LeftCurly => _ = try writer.write(".LeftCurly"),
             .RightCurly => _ = try writer.write(".RightCurly"),
+            .LeftSquare => _ = try writer.write(".LeftSqaure"),
+            .RightSquare => _ = try writer.write(".RightSquare"),
 
             // Operators
+            .Bang => _ = try writer.write(".Bang"),
+            .BangEqual => _ = try writer.write(".BangEqual"),
             .Plus => _ = try writer.write(".Plus"),
             .Dash => _ = try writer.write(".Dash"),
             .Star => _ = try writer.write(".Star"),
@@ -227,6 +253,7 @@ pub const TokenData = union(TokenKind) {
             .While => _ = try writer.write(".While"),
             .Def => _ = try writer.write(".Def"),
             .Var => _ = try writer.write(".Var"),
+            .Struct => _ = try writer.write(".Struct"),
         }
         _ = try writer.write(" }");
     }
@@ -571,6 +598,8 @@ const Tokenizer = struct {
             Token.init(TokenData.Def, this.token_location)
         else if (std.mem.eql(u8, word, "var"))
             Token.init(TokenData.Var, this.token_location)
+        else if (std.mem.eql(u8, word, "struct"))
+            Token.init(TokenData.Struct, this.token_location)
         else
             Token.init(TokenData{ .Ident = word }, this.token_location);
     }
@@ -583,6 +612,12 @@ const Tokenizer = struct {
             ')' => Token.init(TokenData.RightParen, this.token_location),
             '{' => Token.init(TokenData.LeftCurly, this.token_location),
             '}' => Token.init(TokenData.RightCurly, this.token_location),
+            '[' => Token.init(TokenData.LeftSquare, this.token_location),
+            ']' => Token.init(TokenData.RightSquare, this.token_location),
+            '!' => if (this.nextCharIfEqual('='))
+                Token.init(TokenData.BangEqual, this.token_location)
+            else
+                Token.init(TokenData.Bang, this.token_location),
             '+' => Token.init(TokenData.Plus, this.token_location),
             '-' => Token.init(TokenData.Dash, this.token_location),
             '*' => Token.init(TokenData.Star, this.token_location),
@@ -660,6 +695,10 @@ pub const Parser = struct {
         return null;
     }
 
+    fn eat(this: *This, kind: TokenKind) !void {
+        _ = try this.match(kind);
+    }
+
     fn expect(this: *This, kind: TokenKind, err_msg: []const u8) !Token {
         const next = try this.tokenizer.next();
         if (next) |n| {
@@ -733,6 +772,8 @@ pub const Parser = struct {
     fn parseDeclaration(this: *This) !*Ast {
         return if (try this.match(.Def)) |token|
             (try this.parseDef(token)).asAst()
+        else if (try this.match(.Struct)) |token|
+            (try this.parseStruct(token)).asAst()
         else
             this.parseStatement();
     }
@@ -815,8 +856,12 @@ pub const Parser = struct {
                 return expr;
             },
             .LeftCurly => return (try this.parseBlockNoExpect(token)).asAst(),
+            .LeftSquare => return (try this.parseList(token)).asAst(),
 
             // Operators
+            .Bang => {
+                return (try this.parseUnary(.Not, token)).asAst();
+            },
             .Dash => {
                 return (try this.parseUnary(.Negate, token)).asAst();
             },
@@ -856,6 +901,27 @@ pub const Parser = struct {
             .Equal => {
                 return (try this.parseBinary(prec, .Assign, token, previous)).asAst();
             },
+            .BangEqual => {
+                return (try this.parseBinary(prec, .NotEqual, token, previous)).asAst();
+            },
+            .DoubleEqual => {
+                return (try this.parseBinary(prec, .Equal, token, previous)).asAst();
+            },
+
+            .LeftParen => {
+                const args = try this.parseCommaSeparatedExpressions(.RightParen, token);
+                _ = try this.expect(.RightParen, "Expected `)` to terminate call operator.");
+
+                var call = try this.allocator.create(AstBinary);
+                call.* = AstBinary.init(.Call, token, previous, args.asAst());
+
+                return call.asAst();
+            },
+            .LeftSquare => {
+                const expr = (try this.parseBinary(prec, .Index, token, previous)).asAst();
+                _ = try this.expect(.RightSquare, "Expected `]` to terminate index operator.");
+                return expr;
+            },
 
             else => {
                 return raise(ParseError.ParserError, token.location, try std.fmt.allocPrint(this.allocator, "`{!}` is not an infix operation.", .{token}), &this.err_msg);
@@ -893,14 +959,14 @@ pub const Parser = struct {
     }
 
     fn parseBlockNoExpect(this: *This, token: Token) anyerror!*AstBlock {
-        var nodes = ArrayList(*Ast).init(this.allocator);
+        var nodes = ArrayListUnmanaged(*Ast){};
 
         while (true) {
             try this.skipNewlines();
             if ((try this.check(.RightCurly)) or (try this.checkEof())) {
                 break;
             }
-            try nodes.append(try this.parseDeclaration());
+            try nodes.append(this.allocator, try this.parseDeclaration());
         }
 
         _ = try this.expect(.RightCurly, "Expected `}` to terminate block.");
@@ -909,6 +975,41 @@ pub const Parser = struct {
         block.* = AstBlock.init(.Block, token, nodes.items);
 
         return block;
+    }
+
+    fn parseCommaSeparatedExpressions(this: *This, terminator: TokenKind, token: Token) anyerror!*AstBlock {
+        var nodes = ArrayListUnmanaged(*Ast){};
+
+        while (true) {
+            try this.skipNewlines();
+            if ((try this.check(terminator)) or (try this.checkEof())) {
+                break;
+            }
+
+            try nodes.append(this.allocator, try this.parseExpression());
+
+            if ((try this.match(.Newline)) != null) {
+                try this.skipNewlines();
+                try this.eat(.Comma);
+            } else if ((try this.match(.Comma)) != null) {
+                // carry on
+            } else {
+                break;
+            }
+        }
+
+        var block = try this.allocator.create(AstBlock);
+        block.* = AstBlock.init(.Comma, token, nodes.items);
+
+        return block;
+    }
+
+    fn parseList(this: *This, token: Token) anyerror!*AstBlock {
+        const list = try this.parseCommaSeparatedExpressions(.RightSquare, token);
+        _ = try this.expect(.RightSquare, "Expected `]` to terminate List literal.");
+
+        list.kind = .List;
+        return list;
     }
 
     fn parseIdent(this: *This) std.mem.Allocator.Error!?*AstIdent {
@@ -1009,6 +1110,22 @@ pub const Parser = struct {
 
         var node = try this.allocator.create(AstDef);
         node.* = AstDef.init(token, ident, params, body);
+
+        return node;
+    }
+
+    fn parseStruct(this: *This, token: Token) anyerror!*ast.AstStruct {
+        try this.skipNewlines();
+        const ident = (try this.parseIdent()) orelse {
+            return raise(ParseError.ParserError, token.location, "Expected identifier after `struct` keyword.", &this.err_msg);
+        };
+
+        const left_curly_token = try this.skipExpect(.LeftCurly, "Expected `{` to begin struct body.");
+        const body = try this.parseCommaSeparatedExpressions(.RightCurly, left_curly_token);
+        _ = try this.expect(.RightCurly, "Expected `}` to terminate struct body.");
+
+        var node = try this.allocator.create(AstStruct);
+        node.* = AstStruct.init(token, ident, body);
 
         return node;
     }

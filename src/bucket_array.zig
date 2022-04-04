@@ -2,9 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const SinglyLinkedList = std.SinglyLinkedList;
 
-pub fn BucketArray(comptime N: usize, comptime T: type) type {
+pub fn BucketArrayUnmanaged(comptime N: usize, comptime T: type) type {
     return struct {
-        allocator: Allocator,
         buckets: List,
         write_index: usize,
 
@@ -12,27 +11,26 @@ pub fn BucketArray(comptime N: usize, comptime T: type) type {
         const List = SinglyLinkedList(Bucket);
         const Bucket = [N]T;
 
-        pub fn init(allocator: Allocator) This {
+        pub fn init() This {
             return This{
-                .allocator = allocator,
                 .buckets = List{ .first = null },
                 .write_index = 0,
             };
         }
 
-        pub fn deinit(this: *This) void {
+        pub fn deinit(this: *This, allocator: Allocator) void {
             var it = this.buckets.first;
             while (it) |bucket| {
-                this.allocator.destroy(bucket);
+                allocator.destroy(bucket);
                 it = bucket.next;
             }
         }
 
-        pub fn push(this: *This, item: T) !void {
+        pub fn push(this: *This, allocator: Allocator, item: T) !void {
             if (this.buckets.first == null) {
-                this.buckets.first = try this.allocator.create(List.Node);
+                this.buckets.first = try allocator.create(List.Node);
             } else if (this.write_index == N) {
-                const node = try this.allocator.create(List.Node);
+                const node = try allocator.create(List.Node);
                 this.buckets.prepend(node);
                 this.write_index = 0;
             }
@@ -43,12 +41,12 @@ pub fn BucketArray(comptime N: usize, comptime T: type) type {
             this.write_index += 1;
         }
 
-        pub fn pop(this: *This) void {
+        pub fn pop(this: *This, allocator: Allocator) void {
             if (this.write_index == 0) {
                 const node = this.buckets.popFirst() orelse return;
                 this.buckets.first = node.next;
                 this.write_index = N;
-                this.allocator.destroy(node);
+                allocator.destroy(node);
             } else {
                 this.write_index -= 1;
             }
@@ -63,6 +61,40 @@ pub fn BucketArray(comptime N: usize, comptime T: type) type {
                 const node = this.buckets.first orelse return null;
                 return &node.data[this.write_index - 1];
             }
+        }
+    };
+}
+
+pub fn BucketArray(comptime N: usize, comptime T: type) type {
+    return struct {
+        allocator: Allocator,
+        inner: BucketArrayUnmanaged(N, T),
+
+        const This = @This();
+        const List = SinglyLinkedList(Bucket);
+        const Bucket = [N]T;
+
+        pub fn init(allocator: Allocator) This {
+            return This{
+                .allocator = allocator,
+                .inner = BucketArrayUnmanaged(N, T).init(),
+            };
+        }
+
+        pub fn deinit(this: *This) void {
+            this.inner.deinit(this.allocator);
+        }
+
+        pub fn push(this: *This, item: T) !void {
+            return this.inner.push(this.allocator, item);
+        }
+
+        pub fn pop(this: *This) void {
+            return this.inner.pop(this.allocator);
+        }
+
+        pub fn top(this: *This) ?*T {
+            return this.inner.top();
         }
     };
 }

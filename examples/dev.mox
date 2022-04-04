@@ -1,7 +1,10 @@
 # This is a comment
 
-var a = "Denver"
-var b = a
-a = "Jordan"
+struct Person {
+    name
+    age
+}
+
+var person = Person()
 
 # This is a comment at the end of the file

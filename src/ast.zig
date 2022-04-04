@@ -27,18 +27,28 @@ pub const Ast = struct {
             .Ident => try writer.print("{}", .{this.downcastConst(AstIdent)}),
 
             // Unary
-            .Negate => try writer.print("{}", .{this.downcastConst(AstUnary)}),
+            .Negate, .Not => try writer.print("{}", .{this.downcastConst(AstUnary)}),
 
             // Binary
-            .Assign, .Add, .Subtract, .Multiply, .Divide => try writer.print("{}", .{this.downcastConst(AstBinary)}),
+            .Assign,
+            .Add,
+            .Subtract,
+            .Multiply,
+            .Divide,
+            .Equal,
+            .NotEqual,
+            .Index,
+            .Call,
+            => try writer.print("{}", .{this.downcastConst(AstBinary)}),
 
             // Blocks
-            .Block, .Comma => try writer.print("{}", .{this.downcastConst(AstBlock)}),
+            .Block, .Comma, .List => try writer.print("{}", .{this.downcastConst(AstBlock)}),
 
             .If => try writer.print("{}", .{this.downcastConst(AstIf)}),
             .While => try writer.print("{}", .{this.downcastConst(AstWhile)}),
             .Def => try writer.print("{}", .{this.downcastConst(AstDef)}),
             .Var => try writer.print("{}", .{this.downcastConst(AstVar)}),
+            .Struct => try writer.print("{}", .{this.downcastConst(AstStruct)}),
         }
     }
 };
@@ -53,6 +63,7 @@ pub const AstKind = enum {
 
     // Unary
     Negate,
+    Not,
 
     // Binary
     Assign,
@@ -60,15 +71,21 @@ pub const AstKind = enum {
     Subtract,
     Multiply,
     Divide,
+    Equal,
+    NotEqual,
+    Index,
+    Call,
 
     // Blocks
     Block,
     Comma,
+    List,
 
     If,
     While,
     Def,
     Var,
+    Struct,
 };
 
 pub const AstLiteral = struct {
@@ -226,6 +243,23 @@ pub const AstVar = struct {
 
     pub fn init(token: Token, ident: *AstIdent, initializer: *Ast) This {
         return This{ .kind = .Var, .token = token, .ident = ident, .initializer = initializer };
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
+pub const AstStruct = struct {
+    kind: AstKind,
+    token: Token,
+    ident: *AstIdent,
+    body: *AstBlock,
+
+    const This = @This();
+
+    pub fn init(token: Token, ident: *AstIdent, body: *AstBlock) This {
+        return This{ .kind = .Struct, .token = token, .ident = ident, .body = body };
     }
 
     pub fn asAst(this: *This) *Ast {
