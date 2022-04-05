@@ -29,10 +29,11 @@ pub const Value = union(ValueKind) {
             .List => |rc| rc.value.items.len != 0,
             .Closure => true,
             .Struct => true,
+            .Instance => true,
         };
     }
 
-    pub fn isRedCounted(this: This) bool {
+    pub fn isRefCounted(this: This) bool {
         return this == .Str or this == .List or this == .Closure or this == .Struct;
     }
 
@@ -42,6 +43,7 @@ pub const Value = union(ValueKind) {
             .List => |rc| Value{ .List = rc.dupe() },
             .Closure => |rc| Value{ .Closure = rc.dupe() },
             .Struct => |rc| Value{ .Struct = rc.dupe() },
+            .Instance => |rc| Value{ .Instance = rc.dupe() },
             else => this,
         };
     }
@@ -70,6 +72,12 @@ pub const Value = union(ValueKind) {
                 rc.drop(allocator);
             },
             .Struct => |rc| {
+                if (rc.num_references - 1 == 0) {
+                    rc.value.deinit(allocator);
+                }
+                rc.drop(allocator);
+            },
+            .Instance => |rc| {
                 if (rc.num_references - 1 == 0) {
                     rc.value.deinit(allocator);
                 }
@@ -126,12 +134,16 @@ pub const Value = union(ValueKind) {
                 .Struct => todo("Implement Struct equality."),
                 else => false,
             },
+            .Instance => switch (other) {
+                .Instance => todo("Implement Instance equality."),
+                else => false,
+            },
         };
     }
 
     pub fn format(this: *const This, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
         switch (this.*) {
-            .None => try writer.print("None", .{}),
+            .None => try writer.print("none", .{}),
             .Bool => |value| try writer.print("{}", .{value}),
             .Int => |value| try writer.print("{}", .{value}),
             .Num => |value| try writer.print("{d}", .{value}),
@@ -151,6 +163,9 @@ pub const Value = union(ValueKind) {
                 try writer.print("{}", .{rc.value});
             },
             .Struct => |rc| {
+                try writer.print("{}", .{rc.value});
+            },
+            .Instance => |rc| {
                 try writer.print("{}", .{rc.value});
             },
         }
@@ -186,13 +201,13 @@ pub fn RefCounted(comptime T: type) type {
 
         pub fn dupe(this: *This) *This {
             this.num_references += 1;
-            std.debug.print("DUPE {} -> {}\n", .{ this.num_references - 1, this.num_references });
+            std.debug.print("DUPE {} -> {}: 0x{X}\n", .{ this.num_references - 1, this.num_references, @ptrToInt(this) });
             return this;
         }
 
         pub fn drop(this: *This, allocator: Allocator) void {
             this.num_references -= 1;
-            std.debug.print("DROP {} -> {}\n", .{ this.num_references + 1, this.num_references });
+            std.debug.print("DROP {} -> {}: 0x{X}\n", .{ this.num_references + 1, this.num_references, @ptrToInt(this) });
             if (this.num_references == 0) {
                 allocator.destroy(this);
             }
@@ -278,22 +293,27 @@ pub const Instance = struct {
 
     const This = @This();
 
-    pub fn init(_struct: *RefCounted(Struct), fields: StringArrayHashMap(Value)) This {
+    pub fn init(_struct: *RefCounted(Struct), fields: StringArrayHashMapUnmanaged(Value)) This {
         return This{ ._struct = _struct, .fields = fields };
     }
 
     pub fn deinit(this: *This, allocator: Allocator) void {
+        var it = this.fields.iterator();
+        while (it.next()) |entry| {
+            entry.value_ptr.drop(allocator);
+        }
+
         this.fields.deinit(allocator);
         this._struct.drop(allocator);
     }
 
     pub fn format(this: *const This, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try writer.print("{s}(", .{this._struct.name});
+        try writer.print("{s}(", .{this._struct.value.name});
 
-        for (this._struct.fields) |field, i| {
+        for (this._struct.value.fields) |field, i| {
             const field_value = this.fields.getPtr(field.name).?;
             try writer.print("{s}={}", .{ field.name, field_value.* });
-            if (i + 1 < this.fields.len) {
+            if (i + 1 < this._struct.value.fields.len) {
                 try writer.print(", ", .{});
             }
         }

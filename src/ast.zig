@@ -39,6 +39,7 @@ pub const Ast = struct {
             .NotEqual,
             .Index,
             .Call,
+            .Dot,
             => try writer.print("{}", .{this.downcastConst(AstBinary)}),
 
             // Blocks
@@ -75,6 +76,7 @@ pub const AstKind = enum {
     NotEqual,
     Index,
     Call,
+    Dot,
 
     // Blocks
     Block,

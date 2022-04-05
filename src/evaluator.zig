@@ -146,6 +146,7 @@ pub const Evaluator = struct {
             .NotEqual,
             .Index,
             .Call,
+            .Dot,
             => blk: {
                 const binary = node.downcast(ast.AstBinary);
                 break :blk this.evaluateBinary(binary);
@@ -249,6 +250,7 @@ pub const Evaluator = struct {
             .NotEqual => this.evaluateNotEqual(binary.lhs, binary.rhs),
             .Index => this.evaluateIndex(binary.lhs, binary.rhs),
             .Call => this.evaluateCall(binary.lhs, binary.rhs.downcast(ast.AstBlock)),
+            .Dot => this.evaluateDot(binary.lhs, binary.rhs.downcast(ast.AstIdent)),
             else => err.raise(error.RuntimeError, binary.token.location, "Invalid binary operation", &this.err_msg),
         };
     }
@@ -376,7 +378,7 @@ pub const Evaluator = struct {
 
         return switch (callable) {
             .Closure => |rc| this.evaluateCallClosure(rc, args_node, callable_node.token.location),
-            .Struct => |rc| this.evaluateCallStruct(rc, args_node, callable_node.token.location),
+            .Struct => |rc| this.evaluateCallStruct(rc, args_node),
             else => err.raise(error.RuntimeError, callable_node.token.location, "Cannot call something that isn't a `Closure`.", &this.err_msg),
         };
     }
@@ -420,8 +422,45 @@ pub const Evaluator = struct {
         this: *This,
         _struct: *val.RefCounted(val.Struct),
         args_node: *ast.AstBlock,
-        location: CodeLocation,
-    ) anyerror!val.Value {}
+    ) anyerror!val.Value {
+        if (args_node.nodes.len > _struct.value.fields.len) {
+            return err.raise(error.RuntimeError, args_node.nodes[_struct.value.fields.len].token.location, "Too many arguments passed to struct initializer.", &this.err_msg);
+        }
+
+        var fields = StringArrayHashMapUnmanaged(val.Value){};
+
+        for (_struct.value.fields) |field, i| {
+            if (i >= args_node.nodes.len) {
+                try fields.putNoClobber(this.allocator, field.name, val.Value.None);
+            } else {
+                const field_value = try this.evaluateNode(args_node.nodes[i]);
+                try fields.putNoClobber(this.allocator, field.name, field_value);
+            }
+        }
+
+        var instance_val = val.Instance.init(_struct.dupe(), fields);
+        return val.Value{ .Instance = try val.RefCounted(val.Instance).create(this.allocator, instance_val) };
+    }
+
+    fn evaluateDot(this: *This, instance_node: *ast.Ast, field_ident_node: *ast.AstIdent) anyerror!val.Value {
+        const instance = try this.evaluateNode(instance_node);
+        defer instance.drop(this.allocator);
+
+        return switch (instance) {
+            .Instance => |rc| this.evaluateDotInstance(rc, field_ident_node),
+            else => err.raise(error.RuntimeError, instance_node.token.location, "`.` requires its first operand to be an instance of a struct.", &this.err_msg),
+        };
+    }
+
+    fn evaluateDotInstance(
+        this: *This,
+        instance: *val.RefCounted(val.Instance),
+        field_ident_node: *ast.AstIdent,
+    ) anyerror!val.Value {
+        const ident = field_ident_node.ident;
+        const field_ptr = instance.value.fields.getPtr(ident) orelse return err.raise(error.RuntimeError, field_ident_node.token.location, "Instance does not have a field with this name.", &this.err_msg);
+        return field_ptr.dupe();
+    }
 
     fn evaluateAssign(this: *This, assign: *ast.AstBinary) anyerror!void {
         switch (assign.lhs.kind) {
@@ -471,19 +510,19 @@ pub const Evaluator = struct {
             try this.beginScope();
         }
 
+        defer if (block.kind == .Block) {
+            this.endScope();
+        };
+
         for (block.nodes) |node| {
             trval = try this.evaluateNode(node);
 
-            if (trval.isRedCounted()) {
+            if (trval.isRefCounted()) {
                 try this.currentScope().rc_values.append(trval);
             }
         }
 
         const rval = trval.dupe();
-
-        if (block.kind == .Block) {
-            this.endScope();
-        }
 
         return rval;
     }
@@ -501,6 +540,9 @@ pub const Evaluator = struct {
 
     fn evaluateIf(this: *This, _if: *ast.AstIf) anyerror!val.Value {
         const cond = try this.evaluateNode(_if.condition);
+        defer if (cond.isRefCounted()) {
+            cond.drop(this.allocator);
+        };
 
         const rval = if (cond.isTrue())
             this.evaluateNode(_if.then_block.asAst())
@@ -508,10 +550,6 @@ pub const Evaluator = struct {
             this.evaluateNode(else_block)
         else
             @as(val.Value, val.Value.None);
-
-        if (cond.isRedCounted()) {
-            cond.drop(this.allocator);
-        }
 
         return rval;
     }
@@ -521,7 +559,7 @@ pub const Evaluator = struct {
 
         while (true) {
             const cond = try this.evaluateNode(_while.condition);
-            defer if (cond.isRedCounted()) cond.drop(this.allocator);
+            defer if (cond.isRefCounted()) cond.drop(this.allocator);
 
             if (!cond.isTrue()) {
                 break;

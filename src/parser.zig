@@ -80,6 +80,7 @@ pub const Token = struct {
             .Slash => TokenPrecedence.Factor,
             .Equal => TokenPrecedence.Assignment,
             .DoubleEqual => TokenPrecedence.Equality,
+            .Dot => TokenPrecedence.Call,
 
             // Keywords
             .If => TokenPrecedence.None,
@@ -124,6 +125,7 @@ pub const Token = struct {
                 .Slash => try writer.print("/", .{}),
                 .Equal => try writer.print("=", .{}),
                 .DoubleEqual => try writer.print("==", .{}),
+                .Dot => try writer.print(".", .{}),
 
                 // Keywords
                 .If => try writer.print("if", .{}),
@@ -167,6 +169,7 @@ pub const TokenKind = enum {
     Slash,
     Equal,
     DoubleEqual,
+    Dot,
 
     // Keywords
     If,
@@ -205,6 +208,7 @@ pub const TokenData = union(TokenKind) {
     Slash,
     Equal,
     DoubleEqual,
+    Dot,
 
     // Keywords
     If,
@@ -246,6 +250,7 @@ pub const TokenData = union(TokenKind) {
             .Slash => _ = try writer.write(".Slash"),
             .Equal => _ = try writer.write(".Equal"),
             .DoubleEqual => _ = try writer.write(".DoubleEqual"),
+            .Dot => _ = try writer.write(".Dot"),
 
             // Keywords
             .If => _ = try writer.write(".If"),
@@ -626,6 +631,7 @@ const Tokenizer = struct {
                 Token.init(TokenData.DoubleEqual, this.token_location)
             else
                 Token.init(TokenData.Equal, this.token_location),
+            '.' => Token.init(TokenData.Dot, this.token_location),
             else => |c| raise(ParseError.TokenizerError, this.token_location, try std.fmt.allocPrint(this.allocator, "Unknown operator `{u}`", .{c}), &this.err_msg),
         };
     }
@@ -906,6 +912,14 @@ pub const Parser = struct {
             },
             .DoubleEqual => {
                 return (try this.parseBinary(prec, .Equal, token, previous)).asAst();
+            },
+            .Dot => {
+                const ident = (try this.parseIdent()) orelse return raise(error.ParserError, token.location, "Expected an identifier after `.` operator.", &this.err_msg);
+
+                var node = try this.allocator.create(AstBinary);
+                node.* = AstBinary.init(.Dot, token, previous, ident.asAst());
+
+                return node.asAst();
             },
 
             .LeftParen => {
