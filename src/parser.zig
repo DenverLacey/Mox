@@ -18,6 +18,7 @@ const AstWhile = ast.AstWhile;
 const AstDef = ast.AstDef;
 const AstVar = ast.AstVar;
 const AstStruct = ast.AstStruct;
+const AstExtend = ast.AstExtend;
 
 const err = @import("error.zig");
 const ErrMsg = err.ErrMsg;
@@ -89,6 +90,7 @@ pub const Token = struct {
             .Def => TokenPrecedence.None,
             .Var => TokenPrecedence.None,
             .Struct => TokenPrecedence.None,
+            .Extend => TokenPrecedence.None,
         };
     }
 
@@ -134,6 +136,7 @@ pub const Token = struct {
                 .Def => try writer.print("def", .{}),
                 .Var => try writer.print("var", .{}),
                 .Struct => try writer.print("struct", .{}),
+                .Extend => try writer.print("extend", .{}),
             }
         } else {
             try writer.print("Token {{ .data: {}, .location: {} }}", .{ this.data, this.location });
@@ -178,6 +181,7 @@ pub const TokenKind = enum {
     Def,
     Var,
     Struct,
+    Extend,
 };
 
 pub const TokenData = union(TokenKind) {
@@ -217,6 +221,7 @@ pub const TokenData = union(TokenKind) {
     Def,
     Var,
     Struct,
+    Extend,
 
     const This = @This();
 
@@ -259,6 +264,7 @@ pub const TokenData = union(TokenKind) {
             .Def => _ = try writer.write(".Def"),
             .Var => _ = try writer.write(".Var"),
             .Struct => _ = try writer.write(".Struct"),
+            .Extend => _ = try writer.write(".Extend"),
         }
         _ = try writer.write(" }");
     }
@@ -605,6 +611,8 @@ const Tokenizer = struct {
             Token.init(TokenData.Var, this.token_location)
         else if (std.mem.eql(u8, word, "struct"))
             Token.init(TokenData.Struct, this.token_location)
+        else if (std.mem.eql(u8, word, "extend"))
+            Token.init(TokenData.Extend, this.token_location)
         else
             Token.init(TokenData{ .Ident = word }, this.token_location);
     }
@@ -780,6 +788,8 @@ pub const Parser = struct {
             (try this.parseDef(token)).asAst()
         else if (try this.match(.Struct)) |token|
             (try this.parseStruct(token)).asAst()
+        else if (try this.match(.Extend)) |token|
+            (try this.parseExtend(token)).asAst()
         else
             this.parseStatement();
     }
@@ -1140,6 +1150,17 @@ pub const Parser = struct {
 
         var node = try this.allocator.create(AstStruct);
         node.* = AstStruct.init(token, ident, body);
+
+        return node;
+    }
+
+    fn parseExtend(this: *This, token: Token) anyerror!*AstExtend {
+        try this.skipNewlines();
+        const _struct = try this.parseExpression();
+        const body = try this.parseBlock();
+
+        var node = try this.allocator.create(AstExtend);
+        node.* = AstExtend.init(token, _struct, body);
 
         return node;
     }

@@ -86,6 +86,7 @@ pub const Evaluator = struct {
 
     pub fn deinit(this: *This) void {
         this.global_scope.deinit();
+        val.debug_print_rc_info();
     }
 
     fn currentScope(this: *This) *Scope {
@@ -189,6 +190,11 @@ pub const Evaluator = struct {
             .Struct => blk: {
                 const _struct = node.downcast(ast.AstStruct);
                 try this.evaluateStruct(_struct);
+                break :blk val.Value.None;
+            },
+            .Extend => blk: {
+                const extend = node.downcast(ast.AstExtend);
+                try this.evaluateExtend(extend);
                 break :blk val.Value.None;
             },
         };
@@ -466,6 +472,7 @@ pub const Evaluator = struct {
         switch (assign.lhs.kind) {
             .Ident => try this.evaluateAssignIdent(assign.lhs.downcast(ast.AstIdent), assign.rhs),
             .Index => try this.evaluateAssignIndex(assign.lhs.downcast(ast.AstBinary), assign.rhs),
+            .Dot => try this.evaluateAssignDot(assign.lhs.downcast(ast.AstBinary), assign.rhs),
             else => return err.raise(error.RuntimeError, assign.lhs.token.location, "Cannot assign to this kind of expression!", &this.err_msg),
         }
     }
@@ -488,6 +495,29 @@ pub const Evaluator = struct {
             .List => |rc| try this.evaluateAssignIndexList(rc, target.rhs, expr),
             else => return err.raise(error.RuntimeError, target.lhs.token.location, "Cannot index something that isn't a `Str` or a `List`.", &this.err_msg),
         }
+    }
+
+    fn evaluateAssignDot(this: *This, target: *ast.AstBinary, expr: *ast.Ast) anyerror!void {
+        const instance = try this.evaluateNode(target.lhs);
+        defer instance.drop(this.allocator);
+
+        switch (instance) {
+            .Instance => |rc| try this.evaluateAssignDotInstance(rc, target.rhs.downcast(ast.AstIdent), expr),
+            else => return err.raise(error.RuntimeError, target.lhs.token.location, "`.` requires its first operand to be an instance of a struct.", &this.err_msg),
+        }
+    }
+
+    fn evaluateAssignDotInstance(
+        this: *This,
+        instance: *val.RefCounted(val.Instance),
+        field_ident_node: *ast.AstIdent,
+        expr: *ast.Ast,
+    ) anyerror!void {
+        const field_ident = field_ident_node.ident;
+        var field_ptr = instance.value.fields.getPtr(field_ident) orelse return err.raise(error.RuntimeError, field_ident_node.token.location, "Instance does not have a field with this name.", &this.err_msg);
+        field_ptr.drop(this.allocator);
+
+        field_ptr.* = try this.evaluateNode(expr);
     }
 
     fn evaluateAssignIndexList(this: *This, list: *val.RefCounted(std.ArrayListUnmanaged(val.Value)), index_node: *ast.Ast, expr: *ast.Ast) anyerror!void {
@@ -572,6 +602,14 @@ pub const Evaluator = struct {
     }
 
     fn evaluateDef(this: *This, def: *ast.AstDef) anyerror!void {
+        const closure_rc = try this.createDefClosure(def);
+        const closure = val.Value{ .Closure = closure_rc };
+        _ = try this.currentScope().addVariable(def.name, closure, def.token.location, &this.err_msg);
+
+        replPrintAssign(def.name, closure);
+    }
+
+    fn createDefClosure(this: *This, def: *ast.AstDef) anyerror!*val.RefCounted(val.Closure) {
         // @TODO:
         // Find closure values and close them.
         //
@@ -590,13 +628,7 @@ pub const Evaluator = struct {
 
         const closed_values = StringArrayHashMapUnmanaged(val.Value){};
 
-        const closure = val.Value{
-            .Closure = try val.RefCounted(val.Closure).create(this.allocator, val.Closure.init(def.name, params.items, def.body, closed_values)),
-        };
-
-        _ = try this.currentScope().addVariable(def.name, closure, def.token.location, &this.err_msg);
-
-        replPrintAssign(def.name, closure);
+        return try val.RefCounted(val.Closure).create(this.allocator, val.Closure.init(def.name, params.items, def.body, closed_values));
     }
 
     fn evaluateVar(this: *This, _var: *ast.AstVar) anyerror!void {
@@ -628,11 +660,32 @@ pub const Evaluator = struct {
 
         replPrintAssign(ident, struct_ptr.*);
     }
+
+    fn evaluateExtend(this: *This, extend: *ast.AstExtend) anyerror!void {
+        const struct_value = try this.evaluateNode(extend._struct);
+        defer struct_value.drop(this.allocator);
+
+        const _struct = switch (struct_value) {
+            .Struct => |rc| rc,
+            else => return err.raise(error.RuntimeError, extend._struct.token.location, "Can only extend structs.", &this.err_msg),
+        };
+
+        for (extend.body.nodes) |method_node| {
+            switch (method_node.kind) {
+                .Def => {
+                    const def = method_node.downcast(ast.AstDef);
+                    const method = try this.createDefClosure(def);
+                    try _struct.value.methods.put(this.allocator, def.name, method);
+                },
+                else => return err.raise(error.RuntimeError, method_node.token.location, "Can only extend structs with methods.", &this.err_msg),
+            }
+        }
+    }
 };
 
 fn replPrint(kind: ast.AstKind, value: val.Value) void {
     switch (kind) {
-        .Assign, .Var, .Def, .Struct, .Block, .If, .While => {},
+        .Assign, .Var, .Def, .Struct, .Extend, .Block, .If, .While => {},
         else => std.debug.print("{}\n", .{value}),
     }
 }

@@ -50,6 +50,7 @@ pub const Ast = struct {
             .Def => try writer.print("{}", .{this.downcastConst(AstDef)}),
             .Var => try writer.print("{}", .{this.downcastConst(AstVar)}),
             .Struct => try writer.print("{}", .{this.downcastConst(AstStruct)}),
+            .Extend => try writer.print("{}", .{this.downcastConst(AstExtend)}),
         }
     }
 };
@@ -88,6 +89,7 @@ pub const AstKind = enum {
     Def,
     Var,
     Struct,
+    Extend,
 };
 
 pub const AstLiteral = struct {
@@ -262,6 +264,23 @@ pub const AstStruct = struct {
 
     pub fn init(token: Token, ident: *AstIdent, body: *AstBlock) This {
         return This{ .kind = .Struct, .token = token, .ident = ident, .body = body };
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
+pub const AstExtend = struct {
+    kind: AstKind,
+    token: Token,
+    _struct: *Ast,
+    body: *AstBlock,
+
+    const This = @This();
+
+    pub fn init(token: Token, _struct: *Ast, body: *AstBlock) This {
+        return This{ .kind = .Extend, .token = token, ._struct = _struct, .body = body };
     }
 
     pub fn asAst(this: *This) *Ast {

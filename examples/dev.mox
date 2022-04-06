@@ -2,7 +2,18 @@
 
 struct Person { name, age }
 
-var name = "Denver"
-var person = Person(name, 22)
+extend Person {
+    def have_birthday(self) {
+        self.age = self.age + 1
+    }
+}
+
+extend Person {
+    def greet(self) {
+        "HELLO!"
+    }
+}
+
+var person = Person("Denver", 22)
 
 # This is a comment at the end of the file

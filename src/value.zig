@@ -6,6 +6,17 @@ const StringArrayHashMapUnmanaged = std.StringArrayHashMapUnmanaged;
 const AstBlock = @import("ast.zig").AstBlock;
 const todo = @import("error.zig").todo;
 
+const DEBUG_TRACK_RC = false;
+const DEBUG_COUNT_RC = true;
+
+var num_rcs_created: usize = 0;
+var num_rcs_destroyed: usize = 0;
+
+pub fn debug_print_rc_info() void {
+    if (DEBUG_COUNT_RC)
+        std.debug.print("------\nRCs created:   {}\nRcs destroyed: {}\n------\n", .{ num_rcs_created, num_rcs_destroyed });
+}
+
 pub const Value = union(ValueKind) {
     None,
     Bool: bool,
@@ -34,22 +45,29 @@ pub const Value = union(ValueKind) {
     }
 
     pub fn isRefCounted(this: This) bool {
-        return this == .Str or this == .List or this == .Closure or this == .Struct;
+        return this == .Str or this == .List or this == .Closure or this == .Struct or this == .Instance;
     }
 
     pub fn dupe(this: This) This {
         return switch (this) {
+            .None => this,
+            .Bool => this,
+            .Int => this,
+            .Num => this,
             .Str => |rc| Value{ .Str = rc.dupe() },
             .List => |rc| Value{ .List = rc.dupe() },
             .Closure => |rc| Value{ .Closure = rc.dupe() },
             .Struct => |rc| Value{ .Struct = rc.dupe() },
             .Instance => |rc| Value{ .Instance = rc.dupe() },
-            else => this,
         };
     }
 
     pub fn drop(this: This, allocator: Allocator) void {
         switch (this) {
+            .None => {},
+            .Bool => {},
+            .Int => {},
+            .Num => {},
             .Str => |rc| {
                 if (rc.num_references - 1 == 0) {
                     allocator.free(rc.value);
@@ -83,7 +101,6 @@ pub const Value = union(ValueKind) {
                 }
                 rc.drop(allocator);
             },
-            else => {},
         }
     }
 
@@ -192,23 +209,27 @@ pub fn RefCounted(comptime T: type) type {
         const This = @This();
 
         pub fn create(allocator: Allocator, value: T) !*This {
-            var rc = try allocator.create(@This());
-            // rc.allocator = allocator;
+            var rc = try allocator.create(This);
             rc.num_references = 1;
             rc.value = value;
+
+            if (DEBUG_TRACK_RC) std.debug.print("CREATE {}: 0x{X}\n", .{ T, @ptrToInt(rc) });
+            if (DEBUG_COUNT_RC) num_rcs_created += 1;
+
             return rc;
         }
 
         pub fn dupe(this: *This) *This {
             this.num_references += 1;
-            std.debug.print("DUPE {} -> {}: 0x{X}\n", .{ this.num_references - 1, this.num_references, @ptrToInt(this) });
+            if (DEBUG_TRACK_RC) std.debug.print("DUPE {}: {} -> {}: 0x{X}\n", .{ T, this.num_references - 1, this.num_references, @ptrToInt(this) });
             return this;
         }
 
         pub fn drop(this: *This, allocator: Allocator) void {
             this.num_references -= 1;
-            std.debug.print("DROP {} -> {}: 0x{X}\n", .{ this.num_references + 1, this.num_references, @ptrToInt(this) });
+            if (DEBUG_TRACK_RC) std.debug.print("DROP {}: {} -> {}: 0x{X}\n", .{ T, this.num_references + 1, this.num_references, @ptrToInt(this) });
             if (this.num_references == 0) {
+                if (DEBUG_COUNT_RC) num_rcs_destroyed += 1;
                 allocator.destroy(this);
             }
         }
@@ -227,7 +248,12 @@ pub const Closure = struct {
         name: []const u8,
     };
 
-    pub fn init(name: []const u8, params: []Parameter, code: *AstBlock, closed_values: StringArrayHashMapUnmanaged(Value)) This {
+    pub fn init(
+        name: []const u8,
+        params: []Parameter,
+        code: *AstBlock,
+        closed_values: StringArrayHashMapUnmanaged(Value),
+    ) This {
         return This{ .name = name, .params = params, .code = code, .closed_values = closed_values };
     }
 
@@ -240,7 +266,12 @@ pub const Closure = struct {
         allocator.free(this.params);
     }
 
-    pub fn format(this: *const This, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    pub fn format(
+        this: *const This,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) @TypeOf(writer).Error!void {
         try writer.print("{s}(", .{this.name});
 
         var i: usize = 0;
@@ -258,6 +289,7 @@ pub const Closure = struct {
 pub const Struct = struct {
     name: []const u8,
     fields: []Field,
+    methods: StringArrayHashMapUnmanaged(*RefCounted(Closure)),
 
     const This = @This();
 
@@ -266,14 +298,25 @@ pub const Struct = struct {
     };
 
     pub fn init(name: []const u8, fields: []Field) This {
-        return This{ .name = name, .fields = fields };
+        return This{ .name = name, .fields = fields, .methods = .{} };
     }
 
     pub fn deinit(this: *This, allocator: Allocator) void {
+        var it = this.methods.iterator();
+        while (it.next()) |entry| {
+            (Value{ .Closure = entry.value_ptr.* }).drop(allocator);
+        }
+        this.methods.deinit(allocator);
+
         allocator.free(this.fields);
     }
 
-    pub fn format(this: *const This, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    pub fn format(
+        this: *const This,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) @TypeOf(writer).Error!void {
         try writer.print("{s}{{", .{this.name});
 
         for (this.fields) |field, i| {
@@ -304,10 +347,15 @@ pub const Instance = struct {
         }
 
         this.fields.deinit(allocator);
-        this._struct.drop(allocator);
+        (Value{ .Struct = this._struct }).drop(allocator);
     }
 
-    pub fn format(this: *const This, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    pub fn format(
+        this: *const This,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) @TypeOf(writer).Error!void {
         try writer.print("{s}(", .{this._struct.value.name});
 
         for (this._struct.value.fields) |field, i| {
