@@ -113,7 +113,7 @@ pub const Evaluator = struct {
     pub fn evaluate(this: *This, nodes: std.ArrayList(*ast.Ast)) anyerror!void {
         for (nodes.items) |node| {
             const v = try this.evaluateNode(node);
-            replPrint(node.kind, v);
+            // replPrint(node.kind, v);
             v.drop(this.allocator);
         }
     }
@@ -133,6 +133,7 @@ pub const Evaluator = struct {
             // Unary
             .Negate,
             .Not,
+            .Println,
             => blk: {
                 const unary = node.downcast(ast.AstUnary);
                 break :blk this.evaluateUnary(unary);
@@ -224,6 +225,10 @@ pub const Evaluator = struct {
         return switch (unary.kind) {
             .Negate => this.evaluateNegate(unary.sub),
             .Not => this.evaluateNot(unary.sub),
+            .Println => blk: {
+                try this.evaluatePrintln(unary.sub);
+                break :blk val.Value.None;
+            },
             else => err.raise(error.RuntimeError, unary.token.location, "Invalid unary operation", &this.err_msg),
         };
     }
@@ -244,6 +249,20 @@ pub const Evaluator = struct {
             .Bool => |value| val.Value{ .Bool = !value },
             else => err.raise(error.RuntimeError, sub_node.token.location, "`!` requires its operand to be a `Bool`.", &this.err_msg),
         };
+    }
+
+    fn evaluatePrintln(this: *This, sub_node: *ast.Ast) anyerror!void {
+        const args = sub_node.downcast(ast.AstBlock);
+        var stdout = std.io.getStdOut().writer();
+
+        for (args.nodes) |node| {
+            const arg = try this.evaluateNode(node);
+            defer arg.drop(this.allocator);
+
+            try stdout.print("{} ", .{arg});
+        }
+
+        _ = try stdout.write("\n");
     }
 
     fn evaluateBinary(this: *This, binary: *ast.AstBinary) anyerror!val.Value {
@@ -496,7 +515,7 @@ pub const Evaluator = struct {
         value_ptr.drop(this.allocator);
         value_ptr.* = new_value;
 
-        replPrintAssign(ident.ident, value_ptr.*);
+        // replPrintAssign(ident.ident, value_ptr.*);
     }
 
     fn evaluateAssignIndex(this: *This, target: *ast.AstBinary, expr: *ast.Ast) anyerror!void {
@@ -619,7 +638,7 @@ pub const Evaluator = struct {
         const closure = val.Value{ .Closure = closure_rc };
         _ = try this.currentScope().addVariable(def.name, closure, def.token.location, &this.err_msg);
 
-        replPrintAssign(def.name, closure);
+        // replPrintAssign(def.name, closure);
     }
 
     fn createDefClosure(this: *This, def: *ast.AstDef) anyerror!*val.RefCounted(val.Closure) {
@@ -648,9 +667,9 @@ pub const Evaluator = struct {
         const var_ident = _var.ident.ident;
         const initial = try this.evaluateNode(_var.initializer);
 
-        const value_ptr = try this.currentScope().addVariable(var_ident, initial, _var.ident.token.location, &this.err_msg);
+        _ = try this.currentScope().addVariable(var_ident, initial, _var.ident.token.location, &this.err_msg);
 
-        replPrintAssign(var_ident, value_ptr.*);
+        // replPrintAssign(var_ident, value_ptr.*);
     }
 
     fn evaluateStruct(this: *This, _struct: *ast.AstStruct) anyerror!void {
@@ -669,9 +688,9 @@ pub const Evaluator = struct {
 
         const struct_val = val.Value{ .Struct = try val.RefCounted(val.Struct).create(this.allocator, val.Struct.init(ident, fields.items)) };
 
-        const struct_ptr = try this.currentScope().addVariable(ident, struct_val, _struct.token.location, &this.err_msg);
+        _ = try this.currentScope().addVariable(ident, struct_val, _struct.token.location, &this.err_msg);
 
-        replPrintAssign(ident, struct_ptr.*);
+        // replPrintAssign(ident, struct_ptr.*);
     }
 
     fn evaluateExtend(this: *This, extend: *ast.AstExtend) anyerror!void {
@@ -696,16 +715,16 @@ pub const Evaluator = struct {
     }
 };
 
-fn replPrint(kind: ast.AstKind, value: val.Value) void {
-    switch (kind) {
-        .Assign, .Var, .Def, .Struct, .Extend, .Block, .If, .While => {},
-        else => std.debug.print("{}\n", .{value}),
-    }
-}
+// fn replPrint(kind: ast.AstKind, value: val.Value) void {
+//     switch (kind) {
+//         .Assign, .Var, .Def, .Struct, .Extend, .Block, .If, .While => {},
+//         else => std.debug.print("{}\n", .{value}),
+//     }
+// }
 
-fn replPrintAssign(ident: []const u8, value: val.Value) void {
-    std.debug.print("{s} = {}\n", .{ ident, value });
-}
+// fn replPrintAssign(ident: []const u8, value: val.Value) void {
+//     std.debug.print("{s} = {}\n", .{ ident, value });
+// }
 
 fn arrayBoundsCheck(comptime T: type, array: []T, index: usize, index_location: CodeLocation, out_err_msg: *err.ErrMsg) error{RuntimeError}!void {
     if (index < 0 or index >= array.len) {

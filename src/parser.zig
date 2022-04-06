@@ -91,6 +91,7 @@ pub const Token = struct {
             .Var => TokenPrecedence.None,
             .Struct => TokenPrecedence.None,
             .Extend => TokenPrecedence.None,
+            .Println => TokenPrecedence.None,
         };
     }
 
@@ -137,6 +138,7 @@ pub const Token = struct {
                 .Var => try writer.print("var", .{}),
                 .Struct => try writer.print("struct", .{}),
                 .Extend => try writer.print("extend", .{}),
+                .Println => try writer.print("println", .{}),
             }
         } else {
             try writer.print("Token {{ .data: {}, .location: {} }}", .{ this.data, this.location });
@@ -182,6 +184,7 @@ pub const TokenKind = enum {
     Var,
     Struct,
     Extend,
+    Println,
 };
 
 pub const TokenData = union(TokenKind) {
@@ -222,6 +225,7 @@ pub const TokenData = union(TokenKind) {
     Var,
     Struct,
     Extend,
+    Println,
 
     const This = @This();
 
@@ -265,6 +269,7 @@ pub const TokenData = union(TokenKind) {
             .Var => _ = try writer.write(".Var"),
             .Struct => _ = try writer.write(".Struct"),
             .Extend => _ = try writer.write(".Extend"),
+            .Println => _ = try writer.write(".Println"),
         }
         _ = try writer.write(" }");
     }
@@ -613,6 +618,8 @@ const Tokenizer = struct {
             Token.init(TokenData.Struct, this.token_location)
         else if (std.mem.eql(u8, word, "extend"))
             Token.init(TokenData.Extend, this.token_location)
+        else if (std.mem.eql(u8, word, "println"))
+            Token.init(TokenData.Println, this.token_location)
         else
             Token.init(TokenData{ .Ident = word }, this.token_location);
     }
@@ -892,6 +899,9 @@ pub const Parser = struct {
             .Var => {
                 return (try this.parseVar(token)).asAst();
             },
+            .Println => {
+                return (try this.parsePrintln(token)).asAst();
+            },
 
             else => {
                 return raise(ParseError.ParserError, token.location, try std.fmt.allocPrint(this.allocator, "`{!}` is not a prefix operation.", .{token}), &this.err_msg);
@@ -1161,6 +1171,18 @@ pub const Parser = struct {
 
         var node = try this.allocator.create(AstExtend);
         node.* = AstExtend.init(token, _struct, body);
+
+        return node;
+    }
+
+    fn parsePrintln(this: *This, token: Token) anyerror!*AstUnary {
+        const left_paren_token = try this.expect(.LeftParen, "Expected `(` after keyword `println`.");
+
+        const args = try this.parseCommaSeparatedExpressions(.RightParen, left_paren_token);
+        _ = try this.expect(.RightParen, "Expected `)` to terminate `println` statement.");
+
+        var node = try this.allocator.create(AstUnary);
+        node.* = AstUnary.init(.Println, token, args.asAst());
 
         return node;
     }

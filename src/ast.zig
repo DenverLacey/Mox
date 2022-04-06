@@ -27,7 +27,10 @@ pub const Ast = struct {
             .Ident => try writer.print("{}", .{this.downcastConst(AstIdent)}),
 
             // Unary
-            .Negate, .Not => try writer.print("{}", .{this.downcastConst(AstUnary)}),
+            .Negate,
+            .Not,
+            .Println,
+            => try writer.print("{}", .{this.downcastConst(AstUnary)}),
 
             // Binary
             .Assign,
@@ -66,6 +69,7 @@ pub const AstKind = enum {
     // Unary
     Negate,
     Not,
+    Println,
 
     // Binary
     Assign,

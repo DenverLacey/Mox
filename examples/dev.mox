@@ -3,14 +3,20 @@
 struct Person { name, age }
 
 extend Person {
+    def greet(self, name) {
+        println(self.name, "says 'Hello!' to", name)
+    }
+
     def have_birthday(self) {
         self.age = self.age + 1
     }
 }
 
 var p = Person("Devner", 22)
+println(p)
 
 p.have_birthday()
+println(p)
 
 def triple(f) {
     f()
@@ -20,8 +26,10 @@ def triple(f) {
 
 triple(p.have_birthday)
 
-p
+println(p)
 
-p.age == 26
+println(p.age == 26)
+
+p.greet("Jordan")
 
 # This is a comment at the end of the file
