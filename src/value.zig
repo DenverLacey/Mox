@@ -4,7 +4,12 @@ const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const StringArrayHashMapUnmanaged = std.StringArrayHashMapUnmanaged;
 
 const AstBlock = @import("ast.zig").AstBlock;
-const todo = @import("error.zig").todo;
+const err = @import("error.zig");
+const ErrMsg = err.ErrMsg;
+const raise = err.raise;
+const todo = err.todo;
+
+const CodeLocation = @import("parser.zig").CodeLocation;
 
 const DEBUG_TRACK_RC = false;
 const DEBUG_COUNT_RC = true;
@@ -264,6 +269,36 @@ pub const Closure = struct {
         }
 
         allocator.free(this.params);
+    }
+
+    pub fn makeBound(
+        this: *This,
+        allocator: Allocator,
+        receiver: Value,
+        location: CodeLocation,
+        out_err_msg: *ErrMsg,
+    ) !This {
+        var bound: This = undefined;
+        bound.name = this.name;
+        bound.code = this.code;
+
+        bound.params = try allocator.alloc(Parameter, this.params.len - 1);
+        std.mem.copy(Parameter, bound.params, this.params[1..]);
+
+        bound.closed_values = .{};
+        bound.closed_values.putNoClobber(allocator, "self", receiver.dupe()) catch unreachable;
+
+        var it = this.closed_values.iterator();
+        while (it.next()) |entry| {
+            if (bound.closed_values.contains(entry.key_ptr.*)) {
+                const err_msg = try std.fmt.allocPrint(allocator, "`{s}` appears in closure `{s}` more than once.", .{ entry.key_ptr.*, this.name });
+                return raise(error.RuntimeError, location, err_msg, out_err_msg);
+            }
+
+            try bound.closed_values.putNoClobber(allocator, entry.key_ptr.*, entry.value_ptr.dupe());
+        }
+
+        return bound;
     }
 
     pub fn format(

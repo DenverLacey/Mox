@@ -8,12 +8,20 @@ extend Person {
     }
 }
 
-extend Person {
-    def greet(self) {
-        "HELLO!"
-    }
+var p = Person("Devner", 22)
+
+p.have_birthday()
+
+def triple(f) {
+    f()
+    f()
+    f()
 }
 
-var person = Person("Denver", 22)
+triple(p.have_birthday)
+
+p
+
+p.age == 26
 
 # This is a comment at the end of the file

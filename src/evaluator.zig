@@ -389,7 +389,12 @@ pub const Evaluator = struct {
         };
     }
 
-    fn evaluateArgsForCall(this: *This, scope: *Scope, closure: *val.Closure, args: *ast.AstBlock) anyerror!void {
+    fn setupScopeForClosureCall(this: *This, scope: *Scope, closure: *val.Closure, args: *ast.AstBlock) anyerror!void {
+        var it = closure.closed_values.iterator();
+        while (it.next()) |entry| {
+            _ = try scope.addVariable(entry.key_ptr.*, entry.value_ptr.dupe(), args.token.location, &this.err_msg);
+        }
+
         if (args.nodes.len != closure.params.len) {
             return err.raise(error.RuntimeError, args.token.location, try std.fmt.allocPrint(this.allocator, "Inccorect number of arguments! `{s}` expects {} arguments but was given {}.", .{ closure.name, closure.params.len, args.nodes.len }), &this.err_msg);
         }
@@ -417,7 +422,7 @@ pub const Evaluator = struct {
     ) anyerror!val.Value {
         var closure_scope = Scope.init(this.allocator, this.global_scope);
         _ = try closure_scope.addVariable(closure.value.name, val.Value{ .Closure = closure.dupe() }, location, &this.err_msg);
-        try this.evaluateArgsForCall(&closure_scope, &closure.value, args_node);
+        try this.setupScopeForClosureCall(&closure_scope, &closure.value, args_node);
 
         try this.pushScope(closure_scope);
         defer this.endScope();
@@ -464,8 +469,16 @@ pub const Evaluator = struct {
         field_ident_node: *ast.AstIdent,
     ) anyerror!val.Value {
         const ident = field_ident_node.ident;
-        const field_ptr = instance.value.fields.getPtr(ident) orelse return err.raise(error.RuntimeError, field_ident_node.token.location, "Instance does not have a field with this name.", &this.err_msg);
-        return field_ptr.dupe();
+
+        if (instance.value.fields.getPtr(ident)) |field_ptr| {
+            return field_ptr.dupe();
+        } else if (instance.value._struct.value.methods.get(ident)) |method| {
+            const receiver = val.Value{ .Instance = instance };
+            const bound_closure = try method.value.makeBound(this.allocator, receiver, field_ident_node.token.location, &this.err_msg);
+            return val.Value{ .Closure = try val.RefCounted(val.Closure).create(this.allocator, bound_closure) };
+        } else {
+            return err.raise(error.RuntimeError, field_ident_node.token.location, "Instance does not have a field with this name.", &this.err_msg);
+        }
     }
 
     fn evaluateAssign(this: *This, assign: *ast.AstBinary) anyerror!void {

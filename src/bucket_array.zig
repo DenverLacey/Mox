@@ -4,18 +4,15 @@ const SinglyLinkedList = std.SinglyLinkedList;
 
 pub fn BucketArrayUnmanaged(comptime N: usize, comptime T: type) type {
     return struct {
-        buckets: List,
-        write_index: usize,
+        buckets: List = List{ .first = null },
+        write_index: usize = 0,
 
         const This = @This();
         const List = SinglyLinkedList(Bucket);
         const Bucket = [N]T;
 
         pub fn init() This {
-            return This{
-                .buckets = List{ .first = null },
-                .write_index = 0,
-            };
+            return This{};
         }
 
         pub fn deinit(this: *This, allocator: Allocator) void {
