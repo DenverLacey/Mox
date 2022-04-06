@@ -1,6 +1,6 @@
 # Zig stuff
-/zig-cache
-/zig-out
+**/zig-cache
+**/zig-out
 
 # Specific files
 .DS_Store
