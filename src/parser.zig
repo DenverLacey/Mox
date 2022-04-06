@@ -790,7 +790,7 @@ pub const Parser = struct {
         }
     }
 
-    fn parseDeclaration(this: *This) !*Ast {
+    fn parseDeclaration(this: *This) anyerror!*Ast {
         return if (try this.match(.Def)) |token|
             (try this.parseDef(token)).asAst()
         else if (try this.match(.Struct)) |token|
@@ -801,7 +801,7 @@ pub const Parser = struct {
             this.parseStatement();
     }
 
-    fn parseStatement(this: *This) !*Ast {
+    fn parseStatement(this: *This) anyerror!*Ast {
         if (false) {
             // @TODO:
             // This is where statement parsing functions will go.
@@ -851,7 +851,7 @@ pub const Parser = struct {
         return previous;
     }
 
-    fn parsePrefix(this: *This, token: Token) !*Ast {
+    fn parsePrefix(this: *This, token: Token) anyerror!*Ast {
         switch (token.data) {
             // Literals
             .Bool => |value| {
@@ -909,7 +909,7 @@ pub const Parser = struct {
         }
     }
 
-    fn parseInfix(this: *This, token: Token, previous: *Ast) !*Ast {
+    fn parseInfix(this: *This, token: Token, previous: *Ast) anyerror!*Ast {
         const prec = token.precedence();
         switch (token.data) {
             .Plus => {
@@ -1187,7 +1187,7 @@ pub const Parser = struct {
         return node;
     }
 
-    pub fn parse(this: *This) !ArrayList(*Ast) {
+    pub fn parse(this: *This) anyerror!ArrayList(*Ast) {
         var nodes = ArrayList(*Ast).init(this.allocator);
 
         while (true) {
