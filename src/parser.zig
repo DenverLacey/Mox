@@ -828,6 +828,8 @@ pub const Parser = struct {
     }
 
     fn parsePrecedence(this: *This, precedence: TokenPrecedence) anyerror!*Ast {
+        try this.skipNewlines();
+
         const maybe_token = try this.tokenizer.next();
         if (maybe_token == null) {
             return raise(ParseError.ParserError, this.tokenizer.currentLocation(), "Unexpected end of file.", &this.err_msg);
@@ -1059,7 +1061,6 @@ pub const Parser = struct {
     }
 
     fn parseIf(this: *This, token: Token) anyerror!*AstIf {
-        try this.skipNewlines();
         const condition = try this.parseExpression();
 
         const then_block = try this.parseBlock();
@@ -1078,7 +1079,6 @@ pub const Parser = struct {
     }
 
     fn parseWhile(this: *This, token: Token) anyerror!*AstWhile {
-        try this.skipNewlines();
         const condition = try this.parseExpression();
         const block = try this.parseBlock();
 
@@ -1105,13 +1105,13 @@ pub const Parser = struct {
     }
 
     fn parseDef(this: *This, token: Token) anyerror!*AstDef {
-        const ident_token = try this.expect(.Ident, "Expected an identifer after keyword `def`.");
+        const ident_token = try this.skipExpect(.Ident, "Expected an identifer after keyword `def`.");
         const ident = switch (ident_token.data) {
             .Ident => |id| id,
             else => unreachable,
         };
 
-        _ = try this.expect(.LeftParen, "Expected `(` to begin parameter list.");
+        _ = try this.skipExpect(.LeftParen, "Expected `(` to begin parameter list.");
 
         var param_nodes = ArrayList(*Ast).init(this.allocator);
         while (true) {
@@ -1119,7 +1119,7 @@ pub const Parser = struct {
                 break;
             }
 
-            const param_token = try this.expect(.Ident, "Expected parameter name.");
+            const param_token = try this.skipExpect(.Ident, "Expected parameter name.");
             const param_name = switch (param_token.data) {
                 .Ident => |id| id,
                 else => unreachable,
@@ -1130,15 +1130,20 @@ pub const Parser = struct {
 
             try param_nodes.append(param_ident.asAst());
 
-            if ((try this.match(.Comma)) == null or (try this.checkEof())) {
+            if ((try this.match(.Newline)) != null) {
+                try this.skipNewlines();
+                try this.eat(.Comma);
+            } else if ((try this.match(.Comma)) != null) {
+                // carry on
+            } else {
                 break;
             }
         }
 
+        _ = try this.expect(.RightParen, "Expected `)` to terminate parameter list.");
+
         var params = try this.allocator.create(AstBlock);
         params.* = AstBlock.init(.Comma, token, param_nodes.items);
-
-        _ = try this.expect(.RightParen, "Expected `)` to terminate parameter list.");
 
         const body = try this.parseBlock();
 
@@ -1165,7 +1170,6 @@ pub const Parser = struct {
     }
 
     fn parseExtend(this: *This, token: Token) anyerror!*AstExtend {
-        try this.skipNewlines();
         const _struct = try this.parseExpression();
         const body = try this.parseBlock();
 

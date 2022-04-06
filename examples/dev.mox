@@ -32,4 +32,18 @@ println(p.age == 26)
 
 p.greet("Jordan")
 
+# test parser for weird but legal formatting
+def 
+add
+(
+    a
+    b
+) 
+{
+    a + 
+        b
+}
+
+println(add)
+
 # This is a comment at the end of the file
