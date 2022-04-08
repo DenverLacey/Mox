@@ -81,6 +81,8 @@ pub const Token = struct {
             .Slash => TokenPrecedence.Factor,
             .Equal => TokenPrecedence.Assignment,
             .DoubleEqual => TokenPrecedence.Equality,
+            .LeftAngle => TokenPrecedence.Comparison,
+            .RightAngle => TokenPrecedence.Comparison,
             .Dot => TokenPrecedence.Call,
 
             // Keywords
@@ -128,6 +130,8 @@ pub const Token = struct {
                 .Slash => try writer.print("/", .{}),
                 .Equal => try writer.print("=", .{}),
                 .DoubleEqual => try writer.print("==", .{}),
+                .LeftAngle => try writer.print("<", .{}),
+                .RightAngle => try writer.print(">", .{}),
                 .Dot => try writer.print(".", .{}),
 
                 // Keywords
@@ -174,6 +178,8 @@ pub const TokenKind = enum {
     Slash,
     Equal,
     DoubleEqual,
+    LeftAngle,
+    RightAngle,
     Dot,
 
     // Keywords
@@ -215,6 +221,8 @@ pub const TokenData = union(TokenKind) {
     Slash,
     Equal,
     DoubleEqual,
+    LeftAngle,
+    RightAngle,
     Dot,
 
     // Keywords
@@ -259,6 +267,8 @@ pub const TokenData = union(TokenKind) {
             .Slash => _ = try writer.write(".Slash"),
             .Equal => _ = try writer.write(".Equal"),
             .DoubleEqual => _ = try writer.write(".DoubleEqual"),
+            .LeftAngle => _ = try writer.write(".LeftAngle"),
+            .RightAngle => _ = try writer.write(".RightAngle"),
             .Dot => _ = try writer.write(".Dot"),
 
             // Keywords
@@ -429,23 +439,15 @@ const Tokenizer = struct {
         return maybe_next_char;
     }
 
-    fn nextCharIf(this: *This, f: fn (Char) bool) ?Char {
-        const peeked = this.peekChar();
-        if (peeked) |c| {
-            if (!f(c)) {
-                return null;
-            }
-        }
+    fn matchIf(this: *This, f: fn (Char) bool) ?Char {
+        const c = this.peekChar() orelse return null;
+        if (!f(c)) return null;
         return this.nextChar();
     }
 
-    fn nextCharIfEqual(this: *This, c: Char) bool {
-        const peeked = this.peekChar();
-        if (peeked) |pc| {
-            if (c != pc) {
-                return false;
-            }
-        }
+    fn match(this: *This, c: Char) bool {
+        const pc = this.peekChar() orelse return false;
+        if (c != pc) return false;
         return this.nextChar() != null;
     }
 
@@ -544,17 +546,17 @@ const Tokenizer = struct {
     fn tokenizeNumber(this: *This) Token {
         const start_index = this.source.i;
         var end_index: usize = start_index;
-        while (this.nextCharIf(isDigit) != null) {
+        while (this.matchIf(isDigit) != null) {
             end_index = this.source.i;
         }
 
         const reset_index = this.source.i;
-        if (this.nextCharIfEqual('.')) {
+        if (this.match('.')) {
             if (this.peekChar()) |c| {
                 if (!isDigit(c)) {
                     this.source.i = reset_index;
                 } else {
-                    while (this.nextCharIf(isDigit) != null) {
+                    while (this.matchIf(isDigit) != null) {
                         end_index = this.source.i;
                     }
 
@@ -595,7 +597,7 @@ const Tokenizer = struct {
     fn tokenizeIdentOrKeyword(this: *This) Token {
         const start_index = this.source.i;
         var end_index = this.source.i;
-        while (this.nextCharIf(isIdentChar) != null) {
+        while (this.matchIf(isIdentChar) != null) {
             end_index = this.source.i;
         }
         const word = this.source.bytes[start_index..end_index];
@@ -634,7 +636,7 @@ const Tokenizer = struct {
             '}' => Token.init(TokenData.RightCurly, this.token_location),
             '[' => Token.init(TokenData.LeftSquare, this.token_location),
             ']' => Token.init(TokenData.RightSquare, this.token_location),
-            '!' => if (this.nextCharIfEqual('='))
+            '!' => if (this.match('='))
                 Token.init(TokenData.BangEqual, this.token_location)
             else
                 Token.init(TokenData.Bang, this.token_location),
@@ -642,10 +644,12 @@ const Tokenizer = struct {
             '-' => Token.init(TokenData.Dash, this.token_location),
             '*' => Token.init(TokenData.Star, this.token_location),
             '/' => Token.init(TokenData.Slash, this.token_location),
-            '=' => if (this.nextCharIfEqual('='))
+            '=' => if (this.match('='))
                 Token.init(TokenData.DoubleEqual, this.token_location)
             else
                 Token.init(TokenData.Equal, this.token_location),
+            '<' => Token.init(TokenData.LeftAngle, this.token_location),
+            '>' => Token.init(TokenData.RightAngle, this.token_location),
             '.' => Token.init(TokenData.Dot, this.token_location),
             else => |c| raise(ParseError.TokenizerError, this.token_location, try std.fmt.allocPrint(this.allocator, "Unknown operator `{u}`", .{c}), &this.err_msg),
         };
@@ -750,15 +754,18 @@ pub const Parser = struct {
         return raise(ParseError.ParserError, this.tokenizer.currentLocation(), err_msg, &this.err_msg);
     }
 
-    fn expectStatementTerminator(this: *This) !bool {
-        if (try this.tokenizer.next()) |token| {
+    fn expectStatementTerminator(this: *This) !void {
+        if (try this.tokenizer.peek()) |token| {
             return switch (token.data) {
-                .Newline, .Semicolon => true,
-                else => false,
+                .Newline, .Semicolon => {
+                    _ = this.tokenizer.next() catch unreachable;
+                },
+                .RightCurly => return,
+                else => {},
             };
         }
 
-        return true;
+        return raise(ParseError.ParserError, this.tokenizer.token_location, "Expected a statement terminator.", &this.err_msg);
     }
 
     fn skipNewlines(this: *This) !void {
@@ -809,7 +816,7 @@ pub const Parser = struct {
             unreachable;
         } else {
             const node = try this.parseExpressionOrAssignment();
-            _ = try this.expectStatementTerminator();
+            try this.expectStatementTerminator();
             return node;
         }
     }
@@ -934,6 +941,12 @@ pub const Parser = struct {
             },
             .DoubleEqual => {
                 return (try this.parseBinary(prec, .Equal, token, previous)).asAst();
+            },
+            .LeftAngle => {
+                return (try this.parseBinary(prec, .LessThan, token, previous)).asAst();
+            },
+            .RightAngle => {
+                return (try this.parseBinary(prec, .GreaterThan, token, previous)).asAst();
             },
             .Dot => {
                 const ident = (try this.parseIdent()) orelse return raise(error.ParserError, token.location, "Expected an identifier after `.` operator.", &this.err_msg);

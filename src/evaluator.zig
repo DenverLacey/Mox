@@ -146,6 +146,8 @@ pub const Evaluator = struct {
             .Divide,
             .Equal,
             .NotEqual,
+            .LessThan,
+            .GreaterThan,
             .Index,
             .Call,
             .Dot,
@@ -273,6 +275,8 @@ pub const Evaluator = struct {
             .Divide => this.evaluateDivide(binary.lhs, binary.rhs),
             .Equal => this.evaluateEqual(binary.lhs, binary.rhs),
             .NotEqual => this.evaluateNotEqual(binary.lhs, binary.rhs),
+            .LessThan => this.evaluateLessThan(binary.lhs, binary.rhs),
+            .GreaterThan => this.evaluateGreaterThan(binary.lhs, binary.rhs),
             .Index => this.evaluateIndex(binary.lhs, binary.rhs),
             .Call => this.evaluateCall(binary.lhs, binary.rhs.downcast(ast.AstBlock)),
             .Dot => this.evaluateDot(binary.lhs, binary.rhs.downcast(ast.AstIdent)),
@@ -358,7 +362,10 @@ pub const Evaluator = struct {
 
     fn evaluateEqual(this: *This, lhs_node: *ast.Ast, rhs_node: *ast.Ast) anyerror!val.Value {
         const lhs = try this.evaluateNode(lhs_node);
+        defer lhs.drop(this.allocator);
+
         const rhs = try this.evaluateNode(rhs_node);
+        defer rhs.drop(this.allocator);
 
         const equal = lhs.equals(rhs);
         return val.Value{ .Bool = equal };
@@ -366,10 +373,51 @@ pub const Evaluator = struct {
 
     fn evaluateNotEqual(this: *This, lhs_node: *ast.Ast, rhs_node: *ast.Ast) anyerror!val.Value {
         const lhs = try this.evaluateNode(lhs_node);
+        defer lhs.drop(this.allocator);
+
         const rhs = try this.evaluateNode(rhs_node);
+        defer rhs.drop(this.allocator);
 
         const equal = lhs.equals(rhs);
         return val.Value{ .Bool = !equal };
+    }
+
+    fn evaluateLessThan(this: *This, lhs_node: *ast.Ast, rhs_node: *ast.Ast) anyerror!val.Value {
+        const lhs = try this.evaluateNode(lhs_node);
+        const rhs = try this.evaluateNode(rhs_node);
+
+        return switch (lhs) {
+            .Int => |lhs_value| switch (rhs) {
+                .Int => |rhs_value| val.Value{ .Bool = lhs_value < rhs_value },
+                .Num => |rhs_value| val.Value{ .Bool = @intToFloat(f64, lhs_value) < rhs_value },
+                else => err.raise(error.RuntimeError, rhs_node.token.location, "`<` requires its second operand to be either an `Int` or a `Num`.", &this.err_msg),
+            },
+            .Num => |lhs_value| switch (rhs) {
+                .Int => |rhs_value| val.Value{ .Bool = lhs_value < @intToFloat(f64, rhs_value) },
+                .Num => |rhs_value| val.Value{ .Bool = lhs_value < rhs_value },
+                else => err.raise(error.RuntimeError, rhs_node.token.location, "`<` requires its second operand to be either an `Int` or a `Num`.", &this.err_msg),
+            },
+            else => err.raise(error.RuntimeError, lhs_node.token.location, "`<` requires its first operand to be either an `Int` or a `Num`.", &this.err_msg),
+        };
+    }
+
+    fn evaluateGreaterThan(this: *This, lhs_node: *ast.Ast, rhs_node: *ast.Ast) anyerror!val.Value {
+        const lhs = try this.evaluateNode(lhs_node);
+        const rhs = try this.evaluateNode(rhs_node);
+
+        return switch (lhs) {
+            .Int => |lhs_value| switch (rhs) {
+                .Int => |rhs_value| val.Value{ .Bool = lhs_value > rhs_value },
+                .Num => |rhs_value| val.Value{ .Bool = @intToFloat(f64, lhs_value) > rhs_value },
+                else => err.raise(error.RuntimeError, rhs_node.token.location, "`>` requires its second operand to be either an `Int` or a `Num`.", &this.err_msg),
+            },
+            .Num => |lhs_value| switch (rhs) {
+                .Int => |rhs_value| val.Value{ .Bool = lhs_value > @intToFloat(f64, rhs_value) },
+                .Num => |rhs_value| val.Value{ .Bool = lhs_value > rhs_value },
+                else => err.raise(error.RuntimeError, rhs_node.token.location, "`>` requires its second operand to be either an `Int` or a `Num`.", &this.err_msg),
+            },
+            else => err.raise(error.RuntimeError, lhs_node.token.location, "`>` requires its first operand to be either an `Int` or a `Num`.", &this.err_msg),
+        };
     }
 
     fn evaluateIndex(this: *This, container_node: *ast.Ast, index_node: *ast.Ast) anyerror!val.Value {
