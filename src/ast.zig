@@ -201,8 +201,8 @@ pub const AstIf = struct {
 
     const This = @This();
 
-    pub fn init(kind: AstKind, token: Token, condition: *Ast, then_block: *AstBlock, else_block: ?*Ast) This {
-        return This{ .kind = kind, .token = token, .condition = condition, .then_block = then_block, .else_block = else_block };
+    pub fn init(token: Token, condition: *Ast, then_block: *AstBlock, else_block: ?*Ast) This {
+        return This{ .kind = .If, .token = token, .condition = condition, .then_block = then_block, .else_block = else_block };
     }
 
     pub fn asAst(this: *This) *Ast {
@@ -218,8 +218,8 @@ pub const AstWhile = struct {
 
     const This = @This();
 
-    pub fn init(kind: AstKind, token: Token, condition: *Ast, block: *AstBlock) This {
-        return This{ .kind = kind, .token = token, .condition = condition, .block = block };
+    pub fn init(token: Token, condition: *Ast, block: *AstBlock) This {
+        return This{ .kind = .While, .token = token, .condition = condition, .block = block };
     }
 
     pub fn asAst(this: *This) *Ast {

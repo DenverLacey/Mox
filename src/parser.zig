@@ -668,6 +668,12 @@ pub const Parser = struct {
         return This{ .allocator = allocator, .tokenizer = try Tokenizer.init(allocator, source, filename), .err_msg = ErrMsg.default() };
     }
 
+    fn createNode(this: *This, comptime T: type, args: anytype) !*T {
+        var node = try this.allocator.create(T);
+        node.* = @call(.{ .modifier = .always_inline }, T.init, args);
+        return node;
+    }
+
     fn check(this: *This, kind: TokenKind) !bool {
         const next = try this.tokenizer.peek();
         return if (next) |n| n.data == kind else false;
@@ -809,16 +815,9 @@ pub const Parser = struct {
     }
 
     fn parseStatement(this: *This) anyerror!*Ast {
-        if (false) {
-            // @TODO:
-            // This is where statement parsing functions will go.
-            //
-            unreachable;
-        } else {
-            const node = try this.parseExpressionOrAssignment();
-            try this.expectStatementTerminator();
-            return node;
-        }
+        const node = try this.parseExpressionOrAssignment();
+        try this.expectStatementTerminator();
+        return node;
     }
 
     fn parseExpressionOrAssignment(this: *This) anyerror!*Ast {
@@ -876,8 +875,7 @@ pub const Parser = struct {
                 return (try this.createLiteral(.Str, token, AstLiteral.Literal{ .Str = value })).asAst();
             },
             .Ident => |ident| {
-                var node = try this.allocator.create(AstIdent);
-                node.* = AstIdent.init(token, ident);
+                const node = try this.createNode(AstIdent, .{ token, ident });
                 return node.asAst();
             },
 
@@ -951,9 +949,7 @@ pub const Parser = struct {
             .Dot => {
                 const ident = (try this.parseIdent()) orelse return raise(error.ParserError, token.location, "Expected an identifier after `.` operator.", &this.err_msg);
 
-                var node = try this.allocator.create(AstBinary);
-                node.* = AstBinary.init(.Dot, token, previous, ident.asAst());
-
+                const node = try this.createNode(AstBinary, .{ .Dot, token, previous, ident.asAst() });
                 return node.asAst();
             },
 
@@ -961,9 +957,7 @@ pub const Parser = struct {
                 const args = try this.parseCommaSeparatedExpressions(.RightParen, token);
                 _ = try this.expect(.RightParen, "Expected `)` to terminate call operator.");
 
-                var call = try this.allocator.create(AstBinary);
-                call.* = AstBinary.init(.Call, token, previous, args.asAst());
-
+                const call = try this.createNode(AstBinary, .{ .Call, token, previous, args.asAst() });
                 return call.asAst();
             },
             .LeftSquare => {
@@ -986,20 +980,12 @@ pub const Parser = struct {
 
     fn parseUnary(this: *This, kind: AstKind, token: Token) anyerror!*AstUnary {
         const sub = try this.parsePrecedence(.Unary);
-
-        var node = try this.allocator.create(AstUnary);
-        node.* = AstUnary.init(kind, token, sub);
-
-        return node;
+        return this.createNode(AstUnary, .{ kind, token, sub });
     }
 
     fn parseBinary(this: *This, precedence: TokenPrecedence, kind: AstKind, token: Token, lhs: *Ast) anyerror!*AstBinary {
         const rhs = try this.parsePrecedence(precedence.next());
-
-        var node = try this.allocator.create(AstBinary);
-        node.* = AstBinary.init(kind, token, lhs, rhs);
-
-        return node;
+        return this.createNode(AstBinary, .{ kind, token, lhs, rhs });
     }
 
     fn parseBlock(this: *This) anyerror!*AstBlock {
@@ -1020,10 +1006,7 @@ pub const Parser = struct {
 
         _ = try this.expect(.RightCurly, "Expected `}` to terminate block.");
 
-        var block = try this.allocator.create(AstBlock);
-        block.* = AstBlock.init(.Block, token, nodes.items);
-
-        return block;
+        return this.createNode(AstBlock, .{ .Block, token, nodes.items });
     }
 
     fn parseCommaSeparatedExpressions(this: *This, terminator: TokenKind, token: Token) anyerror!*AstBlock {
@@ -1047,10 +1030,7 @@ pub const Parser = struct {
             }
         }
 
-        var block = try this.allocator.create(AstBlock);
-        block.* = AstBlock.init(.Comma, token, nodes.items);
-
-        return block;
+        return this.createNode(AstBlock, .{ .Comma, token, nodes.items });
     }
 
     fn parseList(this: *This, token: Token) anyerror!*AstBlock {
@@ -1065,9 +1045,7 @@ pub const Parser = struct {
         const ident_token = this.expect(.Ident, "") catch return null;
         switch (ident_token.data) {
             .Ident => |ident| {
-                var node = try this.allocator.create(AstIdent);
-                node.* = AstIdent.init(ident_token, ident);
-                return node;
+                return try this.createNode(AstIdent, .{ ident_token, ident });
             },
             else => unreachable,
         }
@@ -1085,20 +1063,14 @@ pub const Parser = struct {
         else
             null;
 
-        var node = try this.allocator.create(AstIf);
-        node.* = AstIf.init(.If, token, condition, then_block, else_block);
-
-        return node;
+        return this.createNode(AstIf, .{ token, condition, then_block, else_block });
     }
 
     fn parseWhile(this: *This, token: Token) anyerror!*AstWhile {
         const condition = try this.parseExpression();
         const block = try this.parseBlock();
 
-        var node = try this.allocator.create(AstWhile);
-        node.* = AstWhile.init(.While, token, condition, block);
-
-        return node;
+        return this.createNode(AstWhile, .{ token, condition, block });
     }
 
     fn parseVar(this: *This, token: Token) anyerror!*AstVar {
@@ -1111,10 +1083,7 @@ pub const Parser = struct {
 
         const initializer = try this.parseExpression();
 
-        var node = try this.allocator.create(AstVar);
-        node.* = AstVar.init(token, ident, initializer);
-
-        return node;
+        return this.createNode(AstVar, .{ token, ident, initializer });
     }
 
     fn parseDef(this: *This, token: Token) anyerror!*AstDef {
@@ -1138,8 +1107,7 @@ pub const Parser = struct {
                 else => unreachable,
             };
 
-            var param_ident = try this.allocator.create(AstIdent);
-            param_ident.* = AstIdent.init(param_token, param_name);
+            const param_ident = try this.createNode(AstIdent, .{ param_token, param_name });
 
             try param_nodes.append(param_ident.asAst());
 
@@ -1155,15 +1123,11 @@ pub const Parser = struct {
 
         _ = try this.expect(.RightParen, "Expected `)` to terminate parameter list.");
 
-        var params = try this.allocator.create(AstBlock);
-        params.* = AstBlock.init(.Comma, token, param_nodes.items);
+        const params = try this.createNode(AstBlock, .{ .Comma, token, param_nodes.items });
 
         const body = try this.parseBlock();
 
-        var node = try this.allocator.create(AstDef);
-        node.* = AstDef.init(token, ident, params, body);
-
-        return node;
+        return this.createNode(AstDef, .{ token, ident, params, body });
     }
 
     fn parseStruct(this: *This, token: Token) anyerror!*ast.AstStruct {
@@ -1176,20 +1140,14 @@ pub const Parser = struct {
         const body = try this.parseCommaSeparatedExpressions(.RightCurly, left_curly_token);
         _ = try this.expect(.RightCurly, "Expected `}` to terminate struct body.");
 
-        var node = try this.allocator.create(AstStruct);
-        node.* = AstStruct.init(token, ident, body);
-
-        return node;
+        return this.createNode(AstStruct, .{ token, ident, body });
     }
 
     fn parseExtend(this: *This, token: Token) anyerror!*AstExtend {
         const _struct = try this.parseExpression();
         const body = try this.parseBlock();
 
-        var node = try this.allocator.create(AstExtend);
-        node.* = AstExtend.init(token, _struct, body);
-
-        return node;
+        return this.createNode(AstExtend, .{ token, _struct, body });
     }
 
     fn parsePrintln(this: *This, token: Token) anyerror!*AstUnary {
@@ -1198,10 +1156,7 @@ pub const Parser = struct {
         const args = try this.parseCommaSeparatedExpressions(.RightParen, left_paren_token);
         _ = try this.expect(.RightParen, "Expected `)` to terminate `println` statement.");
 
-        var node = try this.allocator.create(AstUnary);
-        node.* = AstUnary.init(.Println, token, args.asAst());
-
-        return node;
+        return this.createNode(AstUnary, .{ .Println, token, args.asAst() });
     }
 
     pub fn parse(this: *This) anyerror!ArrayList(*Ast) {
