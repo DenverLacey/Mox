@@ -9,6 +9,8 @@ const err = @import("error.zig");
 const val = @import("value.zig");
 const BucketArray = @import("bucket_array.zig").BucketArrayUnmanaged;
 
+const DEBUG_PRINT_BASE_NODE_RESULTS = false;
+
 const Scope = struct {
     parent: ?*This,
     variables: StringArrayHashMap(val.Value),
@@ -113,7 +115,9 @@ pub const Evaluator = struct {
     pub fn evaluate(this: *This, nodes: std.ArrayList(*ast.Ast)) anyerror!void {
         for (nodes.items) |node| {
             const v = try this.evaluateNode(node);
-            // replPrint(node.kind, v);
+            if (DEBUG_PRINT_BASE_NODE_RESULTS) {
+                std.debug.print("?> {}\n------------\n", .{v});
+            }
             v.drop(this.allocator);
         }
     }
@@ -562,8 +566,6 @@ pub const Evaluator = struct {
         const new_value = try this.evaluateNode(expr);
         value_ptr.drop(this.allocator);
         value_ptr.* = new_value;
-
-        // replPrintAssign(ident.ident, value_ptr.*);
     }
 
     fn evaluateAssignIndex(this: *This, target: *ast.AstBinary, expr: *ast.Ast) anyerror!void {
@@ -685,8 +687,6 @@ pub const Evaluator = struct {
         const closure_rc = try this.createDefClosure(def);
         const closure = val.Value{ .Closure = closure_rc };
         _ = try this.currentScope().addVariable(def.name, closure, def.token.location, &this.err_msg);
-
-        // replPrintAssign(def.name, closure);
     }
 
     fn createDefClosure(this: *This, def: *ast.AstDef) anyerror!*val.RefCounted(val.Closure) {
@@ -716,8 +716,6 @@ pub const Evaluator = struct {
         const initial = try this.evaluateNode(_var.initializer);
 
         _ = try this.currentScope().addVariable(var_ident, initial, _var.ident.token.location, &this.err_msg);
-
-        // replPrintAssign(var_ident, value_ptr.*);
     }
 
     fn evaluateStruct(this: *This, _struct: *ast.AstStruct) anyerror!void {
@@ -737,8 +735,6 @@ pub const Evaluator = struct {
         const struct_val = val.Value{ .Struct = try val.RefCounted(val.Struct).create(this.allocator, val.Struct.init(ident, fields.items)) };
 
         _ = try this.currentScope().addVariable(ident, struct_val, _struct.token.location, &this.err_msg);
-
-        // replPrintAssign(ident, struct_ptr.*);
     }
 
     fn evaluateExtend(this: *This, extend: *ast.AstExtend) anyerror!void {
@@ -763,18 +759,13 @@ pub const Evaluator = struct {
     }
 };
 
-// fn replPrint(kind: ast.AstKind, value: val.Value) void {
-//     switch (kind) {
-//         .Assign, .Var, .Def, .Struct, .Extend, .Block, .If, .While => {},
-//         else => std.debug.print("{}\n", .{value}),
-//     }
-// }
-
-// fn replPrintAssign(ident: []const u8, value: val.Value) void {
-//     std.debug.print("{s} = {}\n", .{ ident, value });
-// }
-
-fn arrayBoundsCheck(comptime T: type, array: []T, index: usize, index_location: CodeLocation, out_err_msg: *err.ErrMsg) error{RuntimeError}!void {
+fn arrayBoundsCheck(
+    comptime T: type,
+    array: []T,
+    index: usize,
+    index_location: CodeLocation,
+    out_err_msg: *err.ErrMsg,
+) error{RuntimeError}!void {
     if (index < 0 or index >= array.len) {
         return err.raise(error.RuntimeError, index_location, "Array bounds check failure!", out_err_msg);
     }

@@ -55,45 +55,45 @@ pub const Token = struct {
     fn precedence(this: *const Token) TokenPrecedence {
         return switch (this.data) {
             // Literals
-            .Bool => TokenPrecedence.None,
-            .Int => TokenPrecedence.None,
-            .Num => TokenPrecedence.None,
-            .Str => TokenPrecedence.None,
-            .Ident => TokenPrecedence.None,
+            .Bool => .None,
+            .Int => .None,
+            .Num => .None,
+            .Str => .None,
+            .Ident => .None,
 
             // Delimeters
-            .Newline => TokenPrecedence.None,
-            .Comma => TokenPrecedence.None,
-            .Semicolon => TokenPrecedence.None,
-            .LeftParen => TokenPrecedence.Call,
-            .RightParen => TokenPrecedence.None,
-            .LeftCurly => TokenPrecedence.None,
-            .RightCurly => TokenPrecedence.None,
-            .LeftSquare => TokenPrecedence.Call,
-            .RightSquare => TokenPrecedence.None,
+            .Newline => .None,
+            .Comma => .None,
+            .Semicolon => .None,
+            .LeftParen => .Call,
+            .RightParen => .None,
+            .LeftCurly => .None,
+            .RightCurly => .None,
+            .LeftSquare => .Call,
+            .RightSquare => .None,
 
             // Operators
-            .Bang => TokenPrecedence.Unary,
-            .BangEqual => TokenPrecedence.Equality,
-            .Plus => TokenPrecedence.Term,
-            .Dash => TokenPrecedence.Term,
-            .Star => TokenPrecedence.Factor,
-            .Slash => TokenPrecedence.Factor,
-            .Equal => TokenPrecedence.Assignment,
-            .DoubleEqual => TokenPrecedence.Equality,
-            .LeftAngle => TokenPrecedence.Comparison,
-            .RightAngle => TokenPrecedence.Comparison,
-            .Dot => TokenPrecedence.Call,
+            .Bang => .Unary,
+            .BangEqual => .Equality,
+            .Plus => .Term,
+            .Dash => .Term,
+            .Star => .Factor,
+            .Slash => .Factor,
+            .Equal => .Assignment,
+            .DoubleEqual => .Equality,
+            .LeftAngle => .Comparison,
+            .RightAngle => .Comparison,
+            .Dot => .Call,
 
             // Keywords
-            .If => TokenPrecedence.None,
-            .Else => TokenPrecedence.None,
-            .While => TokenPrecedence.None,
-            .Def => TokenPrecedence.None,
-            .Var => TokenPrecedence.None,
-            .Struct => TokenPrecedence.None,
-            .Extend => TokenPrecedence.None,
-            .Println => TokenPrecedence.None,
+            .If => .None,
+            .Else => .None,
+            .While => .None,
+            .Def => .None,
+            .Var => .None,
+            .Struct => .None,
+            .Extend => .None,
+            .Println => .None,
         };
     }
 
@@ -628,29 +628,29 @@ const Tokenizer = struct {
 
     fn tokenizePunctuation(this: *This) !Token {
         return switch (this.nextChar().?) {
-            ',' => Token.init(TokenData.Comma, this.token_location),
-            ';' => Token.init(TokenData.Semicolon, this.token_location),
-            '(' => Token.init(TokenData.LeftParen, this.token_location),
-            ')' => Token.init(TokenData.RightParen, this.token_location),
-            '{' => Token.init(TokenData.LeftCurly, this.token_location),
-            '}' => Token.init(TokenData.RightCurly, this.token_location),
-            '[' => Token.init(TokenData.LeftSquare, this.token_location),
-            ']' => Token.init(TokenData.RightSquare, this.token_location),
+            ',' => Token.init(.Comma, this.token_location),
+            ';' => Token.init(.Semicolon, this.token_location),
+            '(' => Token.init(.LeftParen, this.token_location),
+            ')' => Token.init(.RightParen, this.token_location),
+            '{' => Token.init(.LeftCurly, this.token_location),
+            '}' => Token.init(.RightCurly, this.token_location),
+            '[' => Token.init(.LeftSquare, this.token_location),
+            ']' => Token.init(.RightSquare, this.token_location),
             '!' => if (this.match('='))
-                Token.init(TokenData.BangEqual, this.token_location)
+                Token.init(.BangEqual, this.token_location)
             else
-                Token.init(TokenData.Bang, this.token_location),
-            '+' => Token.init(TokenData.Plus, this.token_location),
-            '-' => Token.init(TokenData.Dash, this.token_location),
-            '*' => Token.init(TokenData.Star, this.token_location),
-            '/' => Token.init(TokenData.Slash, this.token_location),
+                Token.init(.Bang, this.token_location),
+            '+' => Token.init(.Plus, this.token_location),
+            '-' => Token.init(.Dash, this.token_location),
+            '*' => Token.init(.Star, this.token_location),
+            '/' => Token.init(.Slash, this.token_location),
             '=' => if (this.match('='))
-                Token.init(TokenData.DoubleEqual, this.token_location)
+                Token.init(.DoubleEqual, this.token_location)
             else
-                Token.init(TokenData.Equal, this.token_location),
-            '<' => Token.init(TokenData.LeftAngle, this.token_location),
-            '>' => Token.init(TokenData.RightAngle, this.token_location),
-            '.' => Token.init(TokenData.Dot, this.token_location),
+                Token.init(.Equal, this.token_location),
+            '<' => Token.init(.LeftAngle, this.token_location),
+            '>' => Token.init(.RightAngle, this.token_location),
+            '.' => Token.init(.Dot, this.token_location),
             else => |c| raise(ParseError.TokenizerError, this.token_location, try std.fmt.allocPrint(this.allocator, "Unknown operator `{u}`", .{c}), &this.err_msg),
         };
     }
@@ -836,12 +836,9 @@ pub const Parser = struct {
     fn parsePrecedence(this: *This, precedence: TokenPrecedence) anyerror!*Ast {
         try this.skipNewlines();
 
-        const maybe_token = try this.tokenizer.next();
-        if (maybe_token == null) {
+        const token = (try this.tokenizer.next()) orelse {
             return raise(ParseError.ParserError, this.tokenizer.currentLocation(), "Unexpected end of file.", &this.err_msg);
-        }
-
-        const token = maybe_token.?;
+        };
 
         var previous = try this.parsePrefix(token);
         while (true) {

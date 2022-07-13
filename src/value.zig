@@ -19,7 +19,7 @@ var num_rcs_destroyed: usize = 0;
 
 pub fn debug_print_rc_info() void {
     if (DEBUG_COUNT_RC)
-        std.debug.print("------\nRCs created:   {}\nRcs destroyed: {}\n------\n", .{ num_rcs_created, num_rcs_destroyed });
+        std.debug.print("------------\nRCs created:   {}\nRCs destroyed: {}\n------------\n", .{ num_rcs_created, num_rcs_destroyed });
 }
 
 pub const Value = union(ValueKind) {
@@ -49,8 +49,22 @@ pub const Value = union(ValueKind) {
         };
     }
 
+    pub fn refCount(this: This) ?usize {
+        return switch (this) {
+            .None => null,
+            .Bool => null,
+            .Int =>  null,
+            .Num =>  null,
+            .Str => |rc| rc.num_references,
+            .List => |rc| rc.num_references,
+            .Closure => |rc| rc.num_references,
+            .Struct => |rc| rc.num_references,
+            .Instance => |rc| rc.num_references,
+        };
+    }
+
     pub fn isRefCounted(this: This) bool {
-        return this == .Str or this == .List or this == .Closure or this == .Struct or this == .Instance;
+        return this.refCount() != null;
     }
 
     pub fn dupe(this: This) This {
@@ -286,7 +300,7 @@ pub const Closure = struct {
         std.mem.copy(Parameter, bound.params, this.params[1..]);
 
         bound.closed_values = .{};
-        bound.closed_values.putNoClobber(allocator, "self", receiver.dupe()) catch unreachable;
+        bound.closed_values.putNoClobber(allocator, this.params[0].name, receiver.dupe()) catch unreachable;
 
         var it = this.closed_values.iterator();
         while (it.next()) |entry| {
