@@ -44,6 +44,7 @@ pub const GarbageCollector = struct {
     instances: ArrayListUnmanaged(GCValue(*Instance)),
 
     const This = @This();
+    const COLLECTION_THRESHOLD: usize = 128;
 
     pub fn init(allocator: Allocator) This {
         return This{
@@ -172,8 +173,20 @@ pub const GarbageCollector = struct {
         this.clearUnmarkedValues();
     }
 
-    fn notEnoughGarbage(_: *This) bool {
-        return false;
+    fn notEnoughGarbage(this: *This) bool {
+        // @INCOMPLETE:
+        // This should probably use the actual amount of memory used
+        // to determine if a collection is reasonable.
+        //
+
+        var num_live_allocations = 
+            this.strings.items.len +
+            this.lists.items.len +
+            this.closures.items.len +
+            this.structs.items.len +
+            this.instances.items.len;
+
+        return num_live_allocations < COLLECTION_THRESHOLD;
     }
 
     fn resetValuesForCollection(this: *This) void {
