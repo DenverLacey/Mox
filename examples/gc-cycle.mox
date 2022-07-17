@@ -1,0 +1,28 @@
+{
+    var list = [1, 2, 3]
+    list[1] = list
+}
+
+{
+    struct Node {
+        value
+        next
+    }
+
+    var node = Node(20, 0)
+    node.next = node
+}
+
+{
+    struct Pair { fst, snd }
+
+    var p = Pair(10, 0)
+
+    {
+        var s0 = "Goodbye"
+        var s1 = "Hello"
+        p.snd = s1
+    }
+
+    println(p.snd)
+}

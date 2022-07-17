@@ -187,6 +187,9 @@ pub const GarbageCollector = struct {
             this.structs.items.len +
             this.instances.items.len;
 
+        if (DEBUG_LOG_NUM_COLLECTIONS)
+            std.debug.print("::: num_live_allocations = {}\n", .{num_live_allocations});
+
         return num_live_allocations < COLLECTION_THRESHOLD;
     }
 
@@ -308,11 +311,14 @@ pub const GarbageCollector = struct {
             if (!values.items[i].marked) {
                 const value = values.swapRemove(i);
 
-                if (DEBUG_TRACE_DEALLOCATIONS)
-                    std.debug.print("::: FREEING \"{}\"\n", .{value.value});
+                if (DEBUG_TRACE_DEALLOCATIONS) {
+                    std.debug.print("::: FREEING {}\n", .{T});
+                    debug_num_deallocations += 1;
+                }
 
                 value.value.deinit(this.allocator);
                 this.allocator.destroy(value.value);
+
                 continue;
             }
             i += 1;
