@@ -1,0 +1,10 @@
+{
+    var s = "Denver"   
+    {
+        var x = 4
+        println(x)
+
+        var name = s
+        println(name)
+    }
+}

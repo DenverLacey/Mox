@@ -109,14 +109,13 @@ pub const Evaluator = struct {
     }
 
     fn endScope(this: *This) void {
-        this.gc.collectGarbage(&this.scopes);
-
         const scope = this.currentScope();
         std.debug.assert(scope != this.global_scope);
 
         scope.deinit();
-
         this.scopes.pop(this.allocator);
+
+        this.gc.collectGarbage(&this.scopes);
     }
 
     pub fn evaluate(this: *This, nodes: std.ArrayList(*ast.Ast)) anyerror!void {

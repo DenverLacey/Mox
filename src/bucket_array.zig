@@ -6,6 +6,7 @@ pub fn BucketArrayUnmanaged(comptime N: usize, comptime T: type) type {
     return struct {
         buckets: List = List{ .first = null },
         write_index: usize = 0,
+        len: usize = 0,
 
         const This = @This();
         const List = SinglyLinkedList(Bucket);
@@ -36,6 +37,7 @@ pub fn BucketArrayUnmanaged(comptime N: usize, comptime T: type) type {
             ptr.* = item;
 
             this.write_index += 1;
+            this.len += 1;
         }
 
         pub fn pop(this: *This, allocator: Allocator) void {
@@ -47,6 +49,8 @@ pub fn BucketArrayUnmanaged(comptime N: usize, comptime T: type) type {
             } else {
                 this.write_index -= 1;
             }
+
+            this.len -= 1;
         }
 
         pub fn top(this: *This) ?*T {

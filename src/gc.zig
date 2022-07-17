@@ -17,7 +17,11 @@ const todo = err.todo;
 
 const BucketArrayUnmanaged = @import("bucket_array.zig").BucketArrayUnmanaged;
 
-const DEBUG_ALWAYS_COLLECT = false;
+const DEBUG_ALWAYS_COLLECT       = false;
+const DEBUG_TRACE_ALLOCATIONS    = false;
+const DEBUG_TRACE_DEALLOCATIONS  = false;
+const DEBUG_LOG_NUM_COLLECTIONS  = false;
+var debug_num_collections: usize = 0;
 
 pub const GarbageCollector = struct {
     allocator: Allocator,
@@ -68,16 +72,27 @@ pub const GarbageCollector = struct {
             this.allocator.destroy(instance.value);
         }
         this.instances.deinit(this.allocator);
+
+        if (DEBUG_LOG_NUM_COLLECTIONS)
+            std.debug.print("::: No. GC Collections: {}\n", .{debug_num_collections});
     }
 
     pub fn copyString(this: *This, s: []const u8) ![]const u8 {
         const allocated = try this.allocator.dupe(u8, s);
+
+        if (DEBUG_TRACE_ALLOCATIONS)
+            std.debug.print("::: ALLOCATING \"{s}\"\n", .{allocated});
+
         try this.strings.append(this.allocator, GCValue([]const u8){ .marked = false, .value = allocated });
         return allocated;
     }
 
     pub fn allocateList(this: *This) !*ArrayListUnmanaged(Value) {
         const list = try this.allocator.create(ArrayListUnmanaged(Value));
+
+        if (DEBUG_TRACE_ALLOCATIONS)
+            std.debug.print("::: ALLOCATING LIST\n", .{});
+
         try this.lists.append(this.allocator, GCValue(*ArrayListUnmanaged(Value)){ .marked = false, .value = list });
         return list;
     }
@@ -85,6 +100,10 @@ pub const GarbageCollector = struct {
     pub fn allocateClosure(this: *This, closure: Closure) !*Closure {
         const allocated = try this.allocator.create(Closure);
         allocated.* = closure;
+
+        if (DEBUG_TRACE_ALLOCATIONS)
+            std.debug.print("::: ALLOCATING {}\n", .{allocated});
+
         try this.closures.append(this.allocator, GCValue(*Closure){ .marked = false, .value = allocated });
         return allocated;
     }
@@ -92,6 +111,10 @@ pub const GarbageCollector = struct {
     pub fn allocateStruct(this: *This, struct_: Struct) !*Struct {
         const allocated = try this.allocator.create(Struct);
         allocated.* = struct_;
+
+        if (DEBUG_TRACE_ALLOCATIONS)
+            std.debug.print("::: ALLOCATING {}\n", .{allocated});
+
         try this.structs.append(this.allocator, GCValue(*Struct){ .marked = false, .value = allocated });
         return allocated;
     }
@@ -99,6 +122,10 @@ pub const GarbageCollector = struct {
     pub fn allocateInstance(this: *This, instance: Instance) !*Instance {
         const allocated = try this.allocator.create(Instance);
         allocated.* = instance;
+
+        if (DEBUG_TRACE_ALLOCATIONS)
+            std.debug.print("::: ALLOCATING {}\n", .{allocated});
+
         try this.instances.append(this.allocator, GCValue(*Instance){ .marked = false, .value = allocated });
         return allocated;
     }
@@ -106,10 +133,18 @@ pub const GarbageCollector = struct {
     pub fn collectGarbage(this: *This, scopes: *BucketArrayUnmanaged(SCOPE_BUCKET_SIZE, Scope)) void {
         if (!DEBUG_ALWAYS_COLLECT and this.notEnoughGarbage()) return;
 
+        if (DEBUG_LOG_NUM_COLLECTIONS)
+            debug_num_collections += 1;
+
+        this.resetValuesForCollection();
+
         var it = scopes.buckets.first;
-        while (it) |bucket| {
+        var i: usize = 0;
+        outer: while (it) |bucket| {
             for (bucket.data) |scope| {
+                if (i >= scopes.len) break :outer;
                 this.markVariables(scope.variables.values());
+                i += 1;
             }
             it = bucket.next;
         }
@@ -118,15 +153,112 @@ pub const GarbageCollector = struct {
     }
 
     fn notEnoughGarbage(_: *This) bool {
-        return true;
+        return false;
     }
 
-    fn markVariables(_: *This, _: []Value) void {
-        todo("Implement `markVariables()`");
+    fn resetValuesForCollection(this: *This) void {
+        resetValuesForCollectionInList([]const u8, &this.strings);
+        resetValuesForCollectionInList(*ArrayListUnmanaged(Value), &this.lists);
+        resetValuesForCollectionInList(*Closure, &this.closures);
+        resetValuesForCollectionInList(*Struct, &this.structs);
+        resetValuesForCollectionInList(*Instance, &this.instances);
     }
 
-    fn clearUnmarkedValues(_: *This) void {
-        todo("Implement `clearUnmarkedValues()`");
+    fn resetValuesForCollectionInList(comptime T: type, list: *ArrayListUnmanaged(GCValue(T))) void {
+        for (list.items) |*value| {
+            value.marked = false;
+        }
+    }
+
+    fn markVariables(this: *This, variables: []Value) void {
+        for (variables) |variable| {
+            this.markVariable(variable);
+        }
+    }
+
+    fn markVariable(this: *This, variable: Value) void {
+        switch (variable) {
+            .None, .Bool, .Int, .Num => {},
+            .Str => |value| {
+                for (this.strings.items) |*string| {
+                    if (&value[0] == &string.value[0]) {
+                        string.marked = true;
+                    }
+                }
+            },
+            .List => |value| {
+                // @TODO: mark items in list
+                for (this.lists.items) |*list| {
+                    if (value == list.value) {
+                        list.marked = true;
+                    }
+                }
+            },
+            .Closure => |value| {
+                // @TODO: mark depended stuff
+                for (this.closures.items) |*closure| {
+                    if (value == closure.value) {
+                        closure.marked = true;
+                    }
+                }
+            },
+            .Struct => |value| {
+                // @TODO: mark depended stuff
+                for (this.structs.items) |*struct_| {
+                    if (value == struct_.value) {
+                        struct_.marked = true;
+                    }
+                }
+            },
+            .Instance => |value| {
+                // @TODO: mark depended stuff
+                for (this.instances.items) |*instance| {
+                    if (value == instance.value) {
+                        instance.marked = true;
+                    }
+                }
+            },
+        }
+    }
+
+    fn clearUnmarkedValues(this: *This) void {
+        this.clearUnmarkedStrings(&this.strings);
+        this.clearUnmarkedValuesInList(*ArrayListUnmanaged(Value), &this.lists);
+        this.clearUnmarkedValuesInList(*Closure, &this.closures);
+        this.clearUnmarkedValuesInList(*Struct, &this.structs);
+        this.clearUnmarkedValuesInList(*Instance, &this.instances);
+    }
+
+    fn clearUnmarkedStrings(this: *This, strings: *ArrayListUnmanaged(GCValue([]const u8))) void {
+        var i: usize = 0;
+        while (i < strings.items.len) {
+            if (!strings.items[i].marked) {
+                const value = strings.swapRemove(i);
+
+                if (DEBUG_TRACE_DEALLOCATIONS)
+                    std.debug.print("::: FREEING \"{s}\"\n", .{value.value});
+
+                this.allocator.free(value.value);
+                continue;
+            }
+            i += 1;
+        }
+    }
+
+    fn clearUnmarkedValuesInList(this: *This, comptime T: type, values: *ArrayListUnmanaged(GCValue(T))) void {
+        var i: usize = 0;
+        while (i < values.items.len) {
+            if (values.items[i].marked) {
+                const value = values.swapRemove(i);
+
+                if (DEBUG_TRACE_DEALLOCATIONS)
+                    std.debug.print("::: FREEING \"{}\"\n", .{value.value});
+
+                this.allocator.destroy(value.value);
+                continue;
+            }
+            i += 1;
+        }
     }
 };
 
