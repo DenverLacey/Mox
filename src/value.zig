@@ -156,6 +156,10 @@ pub const Closure = struct {
         return This{ .name = name, .params = params, .code = code, .closed_values = closed_values };
     }
 
+    pub fn deinit(this: *This, allocator: Allocator) void {
+        allocator.free(this.params);
+    }
+
     pub fn makeBound(
         this: *This,
         allocator: Allocator,

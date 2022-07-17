@@ -274,10 +274,10 @@ pub const GarbageCollector = struct {
 
     fn freeUnmarkedValues(this: *This) void {
         this.freeUnmarkedStrings(&this.strings);
-        this.freeUnmarkedValuesInList(*ArrayListUnmanaged(Value), true, &this.lists);
-        this.freeUnmarkedValuesInList(*Closure, false, &this.closures);
-        this.freeUnmarkedValuesInList(*Struct, true, &this.structs);
-        this.freeUnmarkedValuesInList(*Instance, true, &this.instances);
+        this.freeUnmarkedValuesInList(*ArrayListUnmanaged(Value), &this.lists);
+        this.freeUnmarkedValuesInList(*Closure, &this.closures);
+        this.freeUnmarkedValuesInList(*Struct, &this.structs);
+        this.freeUnmarkedValuesInList(*Instance, &this.instances);
     }
 
     fn freeUnmarkedStrings(this: *This, strings: *ArrayListUnmanaged(GCValue([]const u8))) void {
@@ -301,7 +301,6 @@ pub const GarbageCollector = struct {
     fn freeUnmarkedValuesInList(
         this: *This,
         comptime T: type,
-        comptime do_deinit: bool,
         values: *ArrayListUnmanaged(GCValue(T)),
     ) void {
         var i: usize = 0;
@@ -312,9 +311,7 @@ pub const GarbageCollector = struct {
                 if (DEBUG_TRACE_DEALLOCATIONS)
                     std.debug.print("::: FREEING \"{}\"\n", .{value.value});
 
-                if (do_deinit)
-                    value.value.deinit(this.allocator);
-
+                value.value.deinit(this.allocator);
                 this.allocator.destroy(value.value);
                 continue;
             }
