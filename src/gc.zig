@@ -17,11 +17,22 @@ const todo = err.todo;
 
 const BucketArrayUnmanaged = @import("bucket_array.zig").BucketArrayUnmanaged;
 
-const DEBUG_ALWAYS_COLLECT       = true;
-const DEBUG_TRACE_ALLOCATIONS    = true;
-const DEBUG_TRACE_DEALLOCATIONS  = true;
-const DEBUG_LOG_NUM_COLLECTIONS  = true;
-var debug_num_collections: usize = 0;
+const DEBUG_ALWAYS_COLLECT         = false;
+const DEBUG_TRACE_ALLOCATIONS      = false;
+const DEBUG_TRACE_DEALLOCATIONS    = false;
+const DEBUG_LOG_NUM_COLLECTIONS    = false;
+var debug_num_collections: usize   = 0;
+var debug_num_allocations: usize   = 0;
+var debug_num_deallocations: usize = 0;
+
+fn debugReportGcInfo() void {
+    if (DEBUG_LOG_NUM_COLLECTIONS)
+        std.debug.print("::: No. GC Collections: {}\n", .{debug_num_collections});
+    if (DEBUG_TRACE_ALLOCATIONS)
+        std.debug.print("::: No. Allocations:    {}\n", .{debug_num_allocations});
+    if (DEBUG_TRACE_DEALLOCATIONS)
+        std.debug.print("::: No. Deallocations:  {}\n", .{debug_num_deallocations});
+}
 
 pub const GarbageCollector = struct {
     allocator: Allocator,
@@ -46,6 +57,8 @@ pub const GarbageCollector = struct {
     }
 
     pub fn deinit(this: *This) void {
+        debugReportGcInfo();
+
         for (this.strings.items) |string| {
             this.allocator.free(string.value);
         }
@@ -71,17 +84,16 @@ pub const GarbageCollector = struct {
             instance.value.deinit(this.allocator);
             this.allocator.destroy(instance.value);
         }
-        this.instances.deinit(this.allocator);
-
-        if (DEBUG_LOG_NUM_COLLECTIONS)
-            std.debug.print("::: No. GC Collections: {}\n", .{debug_num_collections});
+        this.instances.deinit(this.allocator);        
     }
 
     pub fn copyString(this: *This, s: []const u8) ![]const u8 {
         const allocated = try this.allocator.dupe(u8, s);
 
-        if (DEBUG_TRACE_ALLOCATIONS)
+        if (DEBUG_TRACE_ALLOCATIONS) {
             std.debug.print("::: ALLOCATING \"{s}\"\n", .{allocated});
+            debug_num_allocations += 1;
+        }
 
         try this.strings.append(this.allocator, GCValue([]const u8){ .marked = false, .value = allocated });
         return allocated;
@@ -90,8 +102,10 @@ pub const GarbageCollector = struct {
     pub fn allocateList(this: *This) !*ArrayListUnmanaged(Value) {
         const list = try this.allocator.create(ArrayListUnmanaged(Value));
 
-        if (DEBUG_TRACE_ALLOCATIONS)
+        if (DEBUG_TRACE_ALLOCATIONS) {
             std.debug.print("::: ALLOCATING LIST\n", .{});
+            debug_num_allocations += 1;
+        }
 
         try this.lists.append(this.allocator, GCValue(*ArrayListUnmanaged(Value)){ .marked = false, .value = list });
         return list;
@@ -101,8 +115,10 @@ pub const GarbageCollector = struct {
         const allocated = try this.allocator.create(Closure);
         allocated.* = closure;
 
-        if (DEBUG_TRACE_ALLOCATIONS)
+        if (DEBUG_TRACE_ALLOCATIONS) {
             std.debug.print("::: ALLOCATING {}\n", .{allocated});
+            debug_num_allocations += 1;
+        }
 
         try this.closures.append(this.allocator, GCValue(*Closure){ .marked = false, .value = allocated });
         return allocated;
@@ -112,8 +128,10 @@ pub const GarbageCollector = struct {
         const allocated = try this.allocator.create(Struct);
         allocated.* = struct_;
 
-        if (DEBUG_TRACE_ALLOCATIONS)
+        if (DEBUG_TRACE_ALLOCATIONS) {
             std.debug.print("::: ALLOCATING {}\n", .{allocated});
+            debug_num_allocations += 1;
+        }
 
         try this.structs.append(this.allocator, GCValue(*Struct){ .marked = false, .value = allocated });
         return allocated;
@@ -123,8 +141,10 @@ pub const GarbageCollector = struct {
         const allocated = try this.allocator.create(Instance);
         allocated.* = instance;
 
-        if (DEBUG_TRACE_ALLOCATIONS)
+        if (DEBUG_TRACE_ALLOCATIONS) {
             std.debug.print("::: ALLOCATING {}\n", .{allocated});
+            debug_num_allocations += 1;
+        }
 
         try this.instances.append(this.allocator, GCValue(*Instance){ .marked = false, .value = allocated });
         return allocated;
@@ -252,8 +272,10 @@ pub const GarbageCollector = struct {
             if (!strings.items[i].marked) {
                 const value = strings.swapRemove(i);
 
-                if (DEBUG_TRACE_DEALLOCATIONS)
+                if (DEBUG_TRACE_DEALLOCATIONS) {
                     std.debug.print("::: FREEING \"{s}\"\n", .{value.value});
+                    debug_num_deallocations += 1;
+                }
 
                 this.allocator.free(value.value);
                 continue;

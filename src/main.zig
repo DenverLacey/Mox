@@ -9,6 +9,8 @@ const Evaluator = evaluator.Evaluator;
 const err = @import("error.zig");
 const ErrMsg = err.ErrMsg;
 
+const DEBUG_PRINT_AST = false;
+
 pub fn main() !void {
     const Gpa = std.heap.GeneralPurposeAllocator(.{});
     var gpa = Gpa{};
@@ -47,8 +49,10 @@ pub fn main() !void {
         return;
     };
 
-    for (nodes.items) |node| {
-        std.debug.print("{}\n\n", .{node});
+    if (DEBUG_PRINT_AST) {
+        for (nodes.items) |node| {
+            std.debug.print("{}\n\n", .{node});
+        }
     }
 
     var e = try Evaluator.init(allocator);
