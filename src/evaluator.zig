@@ -16,7 +16,6 @@ pub const SCOPE_BUCKET_SIZE = 8;
 pub const Scope = struct {
     parent: ?*This,
     variables: StringArrayHashMap(val.Value),
-    // rc_values: std.ArrayList(val.Value),
 
     const This = @This();
 
@@ -24,23 +23,11 @@ pub const Scope = struct {
         return Scope{
             .parent = parent,
             .variables = StringArrayHashMap(val.Value).init(allocator),
-            // .rc_values = std.ArrayList(val.Value).init(allocator),
         };
     }
 
     fn deinit(this: *This) void {
-        // {
-        //     var it = this.variables.iterator();
-        //     while (it.next()) |entry| {
-        //         entry.value_ptr.drop(this.variables.allocator);
-        //     }
-        // }
         this.variables.deinit();
-
-        // for (this.rc_values.items) |value| {
-        //     value.drop(this.rc_values.allocator);
-        // }
-        // this.rc_values.deinit();
     }
 
     fn addVariable(this: *This, ident: []const u8, value: val.Value, location: CodeLocation, out_err_msg: *err.ErrMsg) !*val.Value {
@@ -72,7 +59,6 @@ pub const Evaluator = struct {
     gc: GarbageCollector,
     global_scope: *Scope,
     scopes: BucketArray(SCOPE_BUCKET_SIZE, Scope),
-    // strings: StringArrayHashMap(u0),
     err_msg: err.ErrMsg,
 
     const This = @This();
@@ -93,7 +79,6 @@ pub const Evaluator = struct {
     pub fn deinit(this: *This) void {
         this.global_scope.deinit();
         this.gc.deinit();
-        // val.debug_print_rc_info();
     }
 
     fn currentScope(this: *This) *Scope {
@@ -124,7 +109,6 @@ pub const Evaluator = struct {
             if (DEBUG_PRINT_BASE_NODE_RESULTS) {
                 std.debug.print("?> {}\n------------\n", .{v});
             }
-            // v.drop(this.allocator);
         }
     }
 
@@ -219,9 +203,6 @@ pub const Evaluator = struct {
             .Int => |value| val.Value{ .Int = value },
             .Num => |value| val.Value{ .Num = value },
             .Str => |value| blk: {
-                // const allocated = try this.allocator.dupe(u8, value);
-                // const v = val.Value{ .Str = try val.RefCounted([]const u8).create(this.allocator, allocated) };
-                // break :blk v;
                 const allocated = try this.gc.copyString(value);
                 const v = val.Value{ .Str = allocated };
                 break :blk v;
@@ -231,7 +212,6 @@ pub const Evaluator = struct {
 
     fn evaluateIdent(this: *This, ident: *ast.AstIdent) anyerror!val.Value {
         if (this.currentScope().findVariable(ident.ident)) |variable_ptr| {
-            // return variable_ptr.dupe();
             return variable_ptr.*;
         }
         return err.raise(error.RuntimeError, ident.token.location, "Unknown identifier!", &this.err_msg);
@@ -273,8 +253,6 @@ pub const Evaluator = struct {
 
         for (args.nodes) |node| {
             const arg = try this.evaluateNode(node);
-            // defer arg.drop(this.allocator);
-
             try stdout.print("{} ", .{arg});
         }
 
@@ -376,10 +354,7 @@ pub const Evaluator = struct {
 
     fn evaluateEqual(this: *This, lhs_node: *ast.Ast, rhs_node: *ast.Ast) anyerror!val.Value {
         const lhs = try this.evaluateNode(lhs_node);
-        // defer lhs.drop(this.allocator);
-
         const rhs = try this.evaluateNode(rhs_node);
-        // defer rhs.drop(this.allocator);
 
         const equal = lhs.equals(rhs);
         return val.Value{ .Bool = equal };
@@ -387,10 +362,7 @@ pub const Evaluator = struct {
 
     fn evaluateNotEqual(this: *This, lhs_node: *ast.Ast, rhs_node: *ast.Ast) anyerror!val.Value {
         const lhs = try this.evaluateNode(lhs_node);
-        // defer lhs.drop(this.allocator);
-
         const rhs = try this.evaluateNode(rhs_node);
-        // defer rhs.drop(this.allocator);
 
         const equal = lhs.equals(rhs);
         return val.Value{ .Bool = !equal };
@@ -436,7 +408,6 @@ pub const Evaluator = struct {
 
     fn evaluateIndex(this: *This, container_node: *ast.Ast, index_node: *ast.Ast) anyerror!val.Value {
         const container = try this.evaluateNode(container_node);
-        // defer container.drop(this.allocator);
 
         const index = switch (try this.evaluateNode(index_node)) {
             .Int => |value| value,
@@ -444,9 +415,7 @@ pub const Evaluator = struct {
         };
 
         return switch (container) {
-            // .Str => |rc| this.evaluateIndexStr(rc, index, index_node.token.location),
             .Str => |value| this.evaluateIndexStr(value, index, index_node.token.location),
-            // .List => |rc| this.evaluateIndexList(rc, index, index_node.token.location),
             .List => |value| this.evaluateIndexList(value, index, index_node.token.location),
             else => err.raise(error.RuntimeError, container_node.token.location, "`[` requires its first operand to be either a 'Str' or a 'List'.", &this.err_msg),
         };
@@ -457,15 +426,12 @@ pub const Evaluator = struct {
     }
 
     fn evaluateIndexList(this: *This, list: *std.ArrayListUnmanaged(val.Value), index: i64, index_location: CodeLocation) anyerror!val.Value {
-        // try arrayBoundsCheck(val.Value, list.value.items, @intCast(usize, index), index_location, &this.err_msg);
         try arrayBoundsCheck(val.Value, list.items, @intCast(usize, index), index_location, &this.err_msg);
-        // return list.value.items[@intCast(usize, index)].dupe();
         return list.items[@intCast(usize, index)];
     }
 
     fn evaluateCall(this: *This, callable_node: *ast.Ast, args_node: *ast.AstBlock) anyerror!val.Value {
         const callable = try this.evaluateNode(callable_node);
-        // defer callable.drop(this.allocator);
 
         return switch (callable) {
             .Closure => |rc| this.evaluateCallClosure(rc, args_node, callable_node.token.location),
@@ -477,7 +443,6 @@ pub const Evaluator = struct {
     fn setupScopeForClosureCall(this: *This, scope: *Scope, closure: *val.Closure, args: *ast.AstBlock) anyerror!void {
         var it = closure.closed_values.iterator();
         while (it.next()) |entry| {
-            // _ = try scope.addVariable(entry.key_ptr.*, entry.value_ptr.dupe(), args.token.location, &this.err_msg);
             _ = try scope.addVariable(entry.key_ptr.*, entry.value_ptr.*, args.token.location, &this.err_msg);
         }
 
@@ -507,33 +472,27 @@ pub const Evaluator = struct {
         location: CodeLocation,
     ) anyerror!val.Value {
         var closure_scope = Scope.init(this.allocator, this.global_scope);
-        // _ = try closure_scope.addVariable(closure.value.name, val.Value{ .Closure = closure.dupe() }, location, &this.err_msg);
         _ = try closure_scope.addVariable(closure.name, val.Value{ .Closure = closure }, location, &this.err_msg);
 
-        // try this.setupScopeForClosureCall(&closure_scope, &closure.value, args_node);
         try this.setupScopeForClosureCall(&closure_scope, closure, args_node);
 
         try this.pushScope(closure_scope);
         defer this.endScope();
-        // return this.callClosure(&closure.value);
+
         return this.callClosure(closure);
     }
 
     fn evaluateCallStruct(
         this: *This,
-        // _struct: *val.RefCounted(val.Struct),
         _struct: *val.Struct,
         args_node: *ast.AstBlock,
     ) anyerror!val.Value {
-        // if (args_node.nodes.len > _struct.value.fields.len) {
         if (args_node.nodes.len > _struct.fields.len) {
-            // return err.raise(error.RuntimeError, args_node.nodes[_struct.value.fields.len].token.location, "Too many arguments passed to struct initializer.", &this.err_msg);
             return err.raise(error.RuntimeError, args_node.nodes[_struct.fields.len].token.location, "Too many arguments passed to struct initializer.", &this.err_msg);
         }
 
         var fields = StringArrayHashMapUnmanaged(val.Value){};
 
-        // for (_struct.value.fields) |field, i| {
         for (_struct.fields) |field, i| {
             if (i >= args_node.nodes.len) {
                 try fields.putNoClobber(this.allocator, field.name, val.Value.None);
@@ -543,7 +502,6 @@ pub const Evaluator = struct {
             }
         }
 
-        // var instance_val = val.Instance.init(_struct.dupe(), fields);
         var instance_val = val.Instance.init(_struct, fields);
         const allocated_instance = try this.gc.allocateInstance(instance_val);
         return val.Value{ .Instance = allocated_instance };
@@ -551,7 +509,6 @@ pub const Evaluator = struct {
 
     fn evaluateDot(this: *This, instance_node: *ast.Ast, field_ident_node: *ast.AstIdent) anyerror!val.Value {
         const instance = try this.evaluateNode(instance_node);
-        // defer instance.drop(this.allocator);
 
         return switch (instance) {
             .Instance => |rc| this.evaluateDotInstance(rc, field_ident_node),
@@ -566,18 +523,12 @@ pub const Evaluator = struct {
     ) anyerror!val.Value {
         const ident = field_ident_node.ident;
 
-        // if (instance.value.fields.getPtr(ident)) |field_ptr| {
         if (instance.fields.getPtr(ident)) |field_ptr| {
-            // return field_ptr.dupe();
             return field_ptr.*;
-        // } else if (instance.value._struct.value.methods.get(ident)) |method| {
-        // } else if (instance._struct.value.methods.get(ident)) |method| {
         } else if (instance._struct.methods.get(ident)) |method| {
             const receiver = val.Value{ .Instance = instance };
-            // const bound_closure = try method.value.makeBound(this.allocator, receiver, field_ident_node.token.location, &this.err_msg);
             const bound_closure = try method.makeBound(this.allocator, receiver, field_ident_node.token.location, &this.err_msg);
             const allocated_bound_closure = try this.gc.allocateClosure(bound_closure);
-            // return val.Value{ .Closure = try val.RefCounted(val.Closure).create(this.allocator, bound_closure) };
             return val.Value{ .Closure = allocated_bound_closure };
         } else {
             return err.raise(error.RuntimeError, field_ident_node.token.location, "Instance does not have a field with this name.", &this.err_msg);
@@ -596,13 +547,11 @@ pub const Evaluator = struct {
     fn evaluateAssignIdent(this: *This, ident: *ast.AstIdent, expr: *ast.Ast) anyerror!void {
         const value_ptr = this.currentScope().findVariable(ident.ident) orelse return err.raise(error.RuntimeError, ident.token.location, "Unknown identifier!", &this.err_msg);
         const new_value = try this.evaluateNode(expr);
-        // value_ptr.drop(this.allocator);
         value_ptr.* = new_value;
     }
 
     fn evaluateAssignIndex(this: *This, target: *ast.AstBinary, expr: *ast.Ast) anyerror!void {
         const container = try this.evaluateNode(target.lhs);
-        // defer container.drop(this.allocator);
 
         switch (container) {
             .Str => err.todo("Implement index-assign for Str."),
@@ -613,7 +562,6 @@ pub const Evaluator = struct {
 
     fn evaluateAssignDot(this: *This, target: *ast.AstBinary, expr: *ast.Ast) anyerror!void {
         const instance = try this.evaluateNode(target.lhs);
-        // defer instance.drop(this.allocator);
 
         switch (instance) {
             .Instance => |rc| try this.evaluateAssignDotInstance(rc, target.rhs.downcast(ast.AstIdent), expr),
@@ -623,28 +571,22 @@ pub const Evaluator = struct {
 
     fn evaluateAssignDotInstance(
         this: *This,
-        // instance: *val.RefCounted(val.Instance),
         instance: *val.Instance,
         field_ident_node: *ast.AstIdent,
         expr: *ast.Ast,
     ) anyerror!void {
         const field_ident = field_ident_node.ident;
-        // var field_ptr = instance.value.fields.getPtr(field_ident) orelse return err.raise(error.RuntimeError, field_ident_node.token.location, "Instance does not have a field with this name.", &this.err_msg);
         var field_ptr = instance.fields.getPtr(field_ident) orelse return err.raise(error.RuntimeError, field_ident_node.token.location, "Instance does not have a field with this name.", &this.err_msg);
-        // field_ptr.drop(this.allocator);
 
         field_ptr.* = try this.evaluateNode(expr);
     }
 
-    // fn evaluateAssignIndexList(this: *This, list: *val.RefCounted(std.ArrayListUnmanaged(val.Value)), index_node: *ast.Ast, expr: *ast.Ast) anyerror!void {
     fn evaluateAssignIndexList(this: *This, list: *std.ArrayListUnmanaged(val.Value), index_node: *ast.Ast, expr: *ast.Ast) anyerror!void {
         const index = switch (try this.evaluateNode(index_node)) {
             .Int => |value| value,
             else => return err.raise(error.RuntimeError, index_node.token.location, "Cannot index a container with something other than an `Int`.", &this.err_msg),
         };
 
-        // const value_ptr = &list.value.items[@intCast(usize, index)];
-        // value_ptr.drop(this.allocator);
         const value_ptr = &list.items[@intCast(usize, index)];
 
         const new_value = try this.evaluateNode(expr);
@@ -664,15 +606,7 @@ pub const Evaluator = struct {
 
         for (block.nodes) |node| {
             trval = try this.evaluateNode(node);
-
-            // if (trval.isRefCounted()) {
-            //     try this.currentScope().rc_values.append(trval);
-            // }
         }
-
-        // const rval = trval.dupe();
-
-        // return rval;
 
         return trval;
     }
@@ -685,15 +619,11 @@ pub const Evaluator = struct {
             try items.append(this.allocator, try this.evaluateNode(node));
         }
 
-        // const rc = try val.RefCounted(std.ArrayListUnmanaged(val.Value)).create(this.allocator, items);
         return val.Value{ .List = items };
     }
 
     fn evaluateIf(this: *This, _if: *ast.AstIf) anyerror!val.Value {
         const cond = try this.evaluateNode(_if.condition);
-        // defer if (cond.isRefCounted()) {
-        //     cond.drop(this.allocator);
-        // };
 
         const rval = if (cond.isTrue())
             this.evaluateNode(_if.then_block.asAst())
@@ -710,7 +640,6 @@ pub const Evaluator = struct {
 
         while (true) {
             const cond = try this.evaluateNode(_while.condition);
-            // defer if (cond.isRefCounted()) cond.drop(this.allocator);
 
             if (!cond.isTrue()) {
                 break;
@@ -747,7 +676,6 @@ pub const Evaluator = struct {
 
         const closed_values = StringArrayHashMapUnmanaged(val.Value){};
 
-        // return try val.RefCounted(val.Closure).create(this.allocator, val.Closure.init(def.name, params.items, def.body, closed_values));
         return try this.gc.allocateClosure(val.Closure.init(def.name, params.items, def.body, closed_values));
     }
 
@@ -772,7 +700,6 @@ pub const Evaluator = struct {
             }
         }
 
-        // const struct_val = val.Value{ .Struct = try val.RefCounted(val.Struct).create(this.allocator, val.Struct.init(ident, fields.items)) };
         const struct_val = val.Value{ .Struct = try this.gc.allocateStruct(val.Struct.init(ident, fields.items)) };
 
         _ = try this.currentScope().addVariable(ident, struct_val, _struct.token.location, &this.err_msg);
@@ -780,7 +707,6 @@ pub const Evaluator = struct {
 
     fn evaluateExtend(this: *This, extend: *ast.AstExtend) anyerror!void {
         const struct_value = try this.evaluateNode(extend._struct);
-        // defer struct_value.drop(this.allocator);
 
         const _struct = switch (struct_value) {
             .Struct => |rc| rc,
@@ -792,7 +718,6 @@ pub const Evaluator = struct {
                 .Def => {
                     const def = method_node.downcast(ast.AstDef);
                     const method = try this.createDefClosure(def);
-                    // try _struct.value.methods.put(this.allocator, def.name, method);
                     try _struct.methods.put(this.allocator, def.name, method);
                 },
                 else => return err.raise(error.RuntimeError, method_node.token.location, "Can only extend structs with methods.", &this.err_msg),

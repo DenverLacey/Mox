@@ -53,7 +53,7 @@ pub const GarbageCollector = struct {
             .lists = ArrayListUnmanaged(GCValue(*ArrayListUnmanaged(Value))){},
             .closures = ArrayListUnmanaged(GCValue(*Closure)){},
             .structs = ArrayListUnmanaged(GCValue(*Struct)){},
-            .instances = ArrayListUnmanaged(GCValue(*Instance)){}
+            .instances = ArrayListUnmanaged(GCValue(*Instance)){},
         };
     }
 
@@ -66,6 +66,7 @@ pub const GarbageCollector = struct {
         this.strings.deinit(this.allocator);
 
         for (this.lists.items) |list| {
+            list.value.deinit(this.allocator);
             this.allocator.destroy(list.value);
         }
         this.lists.deinit(this.allocator);
@@ -85,7 +86,7 @@ pub const GarbageCollector = struct {
             instance.value.deinit(this.allocator);
             this.allocator.destroy(instance.value);
         }
-        this.instances.deinit(this.allocator);        
+        this.instances.deinit(this.allocator);
     }
 
     pub fn copyString(this: *This, s: []const u8) ![]const u8 {
@@ -170,7 +171,7 @@ pub const GarbageCollector = struct {
             it = bucket.next;
         }
 
-        this.clearUnmarkedValues();
+        this.freeUnmarkedValues();
     }
 
     fn notEnoughGarbage(this: *This) bool {
@@ -179,7 +180,7 @@ pub const GarbageCollector = struct {
         // to determine if a collection is reasonable.
         //
 
-        var num_live_allocations = 
+        var num_live_allocations =
             this.strings.items.len +
             this.lists.items.len +
             this.closures.items.len +
@@ -271,15 +272,15 @@ pub const GarbageCollector = struct {
         }
     }
 
-    fn clearUnmarkedValues(this: *This) void {
-        this.clearUnmarkedStrings(&this.strings);
-        this.clearUnmarkedValuesInList(*ArrayListUnmanaged(Value), &this.lists);
-        this.clearUnmarkedValuesInList(*Closure, &this.closures);
-        this.clearUnmarkedValuesInList(*Struct, &this.structs);
-        this.clearUnmarkedValuesInList(*Instance, &this.instances);
+    fn freeUnmarkedValues(this: *This) void {
+        this.freeUnmarkedStrings(&this.strings);
+        this.freeUnmarkedValuesInList(*ArrayListUnmanaged(Value), true, &this.lists);
+        this.freeUnmarkedValuesInList(*Closure, false, &this.closures);
+        this.freeUnmarkedValuesInList(*Struct, true, &this.structs);
+        this.freeUnmarkedValuesInList(*Instance, true, &this.instances);
     }
 
-    fn clearUnmarkedStrings(this: *This, strings: *ArrayListUnmanaged(GCValue([]const u8))) void {
+    fn freeUnmarkedStrings(this: *This, strings: *ArrayListUnmanaged(GCValue([]const u8))) void {
         var i: usize = 0;
         while (i < strings.items.len) {
             if (!strings.items[i].marked) {
@@ -297,7 +298,12 @@ pub const GarbageCollector = struct {
         }
     }
 
-    fn clearUnmarkedValuesInList(this: *This, comptime T: type, values: *ArrayListUnmanaged(GCValue(T))) void {
+    fn freeUnmarkedValuesInList(
+        this: *This,
+        comptime T: type,
+        comptime do_deinit: bool,
+        values: *ArrayListUnmanaged(GCValue(T)),
+    ) void {
         var i: usize = 0;
         while (i < values.items.len) {
             if (!values.items[i].marked) {
@@ -305,6 +311,9 @@ pub const GarbageCollector = struct {
 
                 if (DEBUG_TRACE_DEALLOCATIONS)
                     std.debug.print("::: FREEING \"{}\"\n", .{value.value});
+
+                if (do_deinit)
+                    value.value.deinit(this.allocator);
 
                 this.allocator.destroy(value.value);
                 continue;
