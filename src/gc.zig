@@ -17,10 +17,10 @@ const todo = err.todo;
 
 const BucketArrayUnmanaged = @import("bucket_array.zig").BucketArrayUnmanaged;
 
-const DEBUG_ALWAYS_COLLECT       = false;
-const DEBUG_TRACE_ALLOCATIONS    = false;
-const DEBUG_TRACE_DEALLOCATIONS  = false;
-const DEBUG_LOG_NUM_COLLECTIONS  = false;
+const DEBUG_ALWAYS_COLLECT       = true;
+const DEBUG_TRACE_ALLOCATIONS    = true;
+const DEBUG_TRACE_DEALLOCATIONS  = true;
+const DEBUG_LOG_NUM_COLLECTIONS  = true;
 var debug_num_collections: usize = 0;
 
 pub const GarbageCollector = struct {
@@ -187,37 +187,54 @@ pub const GarbageCollector = struct {
                 }
             },
             .List => |value| {
-                // @TODO: mark items in list
                 for (this.lists.items) |*list| {
                     if (value == list.value) {
+                        if (!list.marked)
+                            this.markVariables(list.value.items);
                         list.marked = true;
                     }
                 }
             },
             .Closure => |value| {
-                // @TODO: mark depended stuff
-                for (this.closures.items) |*closure| {
-                    if (value == closure.value) {
-                        closure.marked = true;
-                    }
-                }
+                this.markClosure(value);
             },
             .Struct => |value| {
-                // @TODO: mark depended stuff
-                for (this.structs.items) |*struct_| {
-                    if (value == struct_.value) {
-                        struct_.marked = true;
-                    }
-                }
+                this.markStruct(value);
             },
             .Instance => |value| {
-                // @TODO: mark depended stuff
                 for (this.instances.items) |*instance| {
                     if (value == instance.value) {
+                        if (!instance.marked) {
+                            this.markStruct(instance.value._struct);
+                            this.markVariables(instance.value.fields.values());
+                        }
                         instance.marked = true;
                     }
                 }
             },
+        }
+    }
+
+    fn markClosure(this: *This, closure: *Closure) void {
+        for (this.closures.items) |*c| {
+            if (closure == c.value) {
+                if (!c.marked)
+                    this.markVariables(c.value.closed_values.values());
+                c.marked = true;
+            }
+        }
+    }
+
+    fn markStruct(this: *This, struct_: *Struct) void {
+        for (this.structs.items) |*s| {
+            if (struct_ == s.value) {
+                if (!s.marked) {
+                    for (s.value.methods.values()) |method| {
+                        this.markClosure(method);
+                    }
+                }
+                s.marked = true;
+            }
         }
     }
 
@@ -248,7 +265,7 @@ pub const GarbageCollector = struct {
     fn clearUnmarkedValuesInList(this: *This, comptime T: type, values: *ArrayListUnmanaged(GCValue(T))) void {
         var i: usize = 0;
         while (i < values.items.len) {
-            if (values.items[i].marked) {
+            if (!values.items[i].marked) {
                 const value = values.swapRemove(i);
 
                 if (DEBUG_TRACE_DEALLOCATIONS)
