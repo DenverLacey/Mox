@@ -17,7 +17,7 @@ const todo = err.todo;
 
 const BucketArrayUnmanaged = @import("bucket_array.zig").BucketArrayUnmanaged;
 
-const DEBUG_ALWAYS_COLLECT         = false;
+const DEBUG_ALWAYS_COLLECT         = true;
 const DEBUG_TRACE_ALLOCATIONS      = false;
 const DEBUG_TRACE_DEALLOCATIONS    = false;
 const DEBUG_LOG_NUM_COLLECTIONS    = false;
@@ -72,6 +72,7 @@ pub const GarbageCollector = struct {
         this.lists.deinit(this.allocator);
 
         for (this.closures.items) |closure| {
+            closure.value.deinit(this.allocator);
             this.allocator.destroy(closure.value);
         }
         this.closures.deinit(this.allocator);
@@ -160,15 +161,9 @@ pub const GarbageCollector = struct {
 
         this.resetValuesForCollection();
 
-        var it = scopes.buckets.first;
-        var i: usize = 0;
-        outer: while (it) |bucket| {
-            for (bucket.data) |scope| {
-                if (i >= scopes.len) break :outer;
-                this.markVariables(scope.variables.values());
-                i += 1;
-            }
-            it = bucket.next;
+        var it = scopes.iterator();
+        while (it.next()) |scope| {
+            this.markVariables(scope.variables.values());
         }
 
         this.freeUnmarkedValues();

@@ -24,11 +24,17 @@ pub fn BucketArrayUnmanaged(comptime N: usize, comptime T: type) type {
             }
         }
 
+        fn makeNode(allocator: Allocator) !*List.Node {
+            var node = try allocator.create(List.Node);
+            node.next = null;
+            return node;
+        }
+
         pub fn push(this: *This, allocator: Allocator, item: T) !void {
             if (this.buckets.first == null) {
-                this.buckets.first = try allocator.create(List.Node);
+                this.buckets.first = try makeNode(allocator);
             } else if (this.write_index == N) {
-                const node = try allocator.create(List.Node);
+                const node = try makeNode(allocator);
                 this.buckets.prepend(node);
                 this.write_index = 0;
             }
@@ -63,6 +69,10 @@ pub fn BucketArrayUnmanaged(comptime N: usize, comptime T: type) type {
                 return &node.data[this.write_index - 1];
             }
         }
+
+        pub fn iterator(this: *This) Iterator(N, T) {
+            return Iterator(N, T).init(this.buckets.first, this.write_index);
+        }
     };
 }
 
@@ -72,8 +82,8 @@ pub fn BucketArray(comptime N: usize, comptime T: type) type {
         inner: BucketArrayUnmanaged(N, T),
 
         const This = @This();
-        const List = SinglyLinkedList(Bucket);
-        const Bucket = [N]T;
+        const List = BucketArrayUnmanaged(N, T).List;
+        const Bucket = BucketArrayUnmanaged(N, T).Bucket;
 
         pub fn init(allocator: Allocator) This {
             return This{
@@ -96,6 +106,43 @@ pub fn BucketArray(comptime N: usize, comptime T: type) type {
 
         pub fn top(this: *This) ?*T {
             return this.inner.top();
+        }
+
+        pub fn iterator(this: *This) Iterator(N, T) {
+            return this.inner.iterator();
+        }
+    };
+}
+
+pub fn Iterator(comptime N: usize, comptime T: type) type {
+    return struct {
+        current_bucket: ?*BucketArrayUnmanaged(N, T).List.Node,
+        current_index: usize,
+        end_index: usize,
+
+        const This = @This();
+
+        fn init(start_bucket: ?*BucketArrayUnmanaged(N, T).List.Node, end_index: usize) This {
+            return This{ .current_bucket = start_bucket, .current_index = 0, .end_index = end_index };
+        }
+
+        pub fn next(this: *This) ?*T {
+            if (this.current_index >= N) {
+                this.current_bucket = this.current_bucket.?.next;
+                this.current_index = 0;
+            }
+
+            const bucket = this.current_bucket orelse return null;
+
+            if (bucket.next == null and this.current_index == this.end_index) {
+                this.current_bucket = null;
+                return null;
+            }
+
+            const n = &bucket.data[this.current_index];
+            this.current_index += 1;
+
+            return n;
         }
     };
 }
