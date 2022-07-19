@@ -14,9 +14,11 @@ const CodeLocation = @import("parser.zig").CodeLocation;
 pub const Value = union(ValueKind) {
     None,
     Bool: bool,
+    Char: Char,
     Int: i64,
     Num: f64,
     Str: []const u8,
+    Range: Range,
     List: *ArrayListUnmanaged(Value),
     Closure: *Closure,
     Struct: *Struct,
@@ -28,9 +30,11 @@ pub const Value = union(ValueKind) {
         return switch (this) {
             .None => false,
             .Bool => |value| value,
+            .Char => |value| value != 0,
             .Int => |value| value != 0,
             .Num => |value| value != 0.0,
             .Str => |value| value.len != 0,
+            .Range => true,
             .List => |value| value.items.len != 0,
             .Closure => true,
             .Struct => true,
@@ -48,6 +52,10 @@ pub const Value = union(ValueKind) {
                 .Bool => |other_value| value == other_value,
                 else => false,
             },
+            .Char => |value| switch (other) {
+                .Char => |other_value| value == other_value,
+                else => false,
+            },
             .Int => |value| switch (other) {
                 .Int => |other_value| value == other_value,
                 else => false,
@@ -58,6 +66,10 @@ pub const Value = union(ValueKind) {
             },
             .Str => |value| switch (other) {
                 .Str => |other_value| std.mem.eql(u8, value, other_value),
+                else => false,
+            },
+            .Range => |value| switch (other) {
+                .Range => |other_value| value.start == other_value.start and value.end == other_value.end,
                 else => false,
             },
             .List => |value| switch (other) {
@@ -96,9 +108,11 @@ pub const Value = union(ValueKind) {
         switch (this.*) {
             .None => try writer.print("none", .{}),
             .Bool => |value| try writer.print("{}", .{value}),
+            .Char => |value| try writer.print("{u}", .{value}),
             .Int => |value| try writer.print("{}", .{value}),
             .Num => |value| try writer.print("{d}", .{value}),
             .Str => |value| try writer.print("{s}", .{value}),
+            .Range => |value| try writer.print("{}", .{value}),
             .List => |value| {
                 try writer.print("[", .{});
                 var i: usize = 0;
@@ -126,13 +140,37 @@ pub const Value = union(ValueKind) {
 pub const ValueKind = enum {
     None,
     Bool,
+    Char,
     Int,
     Num,
     Str,
+    Range,
     List,
     Closure,
     Struct,
     Instance,
+};
+
+pub const Char = u21;
+
+pub const Range = struct {
+    start: i64,
+    end: i64,
+
+    const This = @This();
+
+    pub fn init(start: i64, end: i64) This {
+        return This{ .start = start, .end = end };
+    }
+
+    pub fn format(
+        this: *const This,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) @TypeOf(writer).Error!void {
+        try writer.print("{}..{}", .{this.start, this.end});
+    }
 };
 
 pub const Closure = struct {

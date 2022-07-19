@@ -15,6 +15,7 @@ const AstBinary = ast.AstBinary;
 const AstBlock = ast.AstBlock;
 const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
+const AstFor = ast.AstFor;
 const AstDef = ast.AstDef;
 const AstVar = ast.AstVar;
 const AstStruct = ast.AstStruct;
@@ -25,6 +26,8 @@ const ErrMsg = err.ErrMsg;
 const raise = err.raise;
 const todo = err.todo;
 const todoAsErr = err.todoAsErr;
+
+const Char = @import("value.zig").Char;
 
 pub const CodeLocation = struct {
     line: usize,
@@ -56,6 +59,7 @@ pub const Token = struct {
         return switch (this.data) {
             // Literals
             .Bool => .None,
+            .Char => .None,
             .Int => .None,
             .Num => .None,
             .Str => .None,
@@ -75,6 +79,8 @@ pub const Token = struct {
             // Operators
             .Bang => .Unary,
             .BangEqual => .Equality,
+            .Or => .Or,
+            .And => .And,
             .Plus => .Term,
             .Dash => .Term,
             .Star => .Factor,
@@ -84,11 +90,14 @@ pub const Token = struct {
             .LeftAngle => .Comparison,
             .RightAngle => .Comparison,
             .Dot => .Call,
+            .DoubleDot => .Range,
 
             // Keywords
             .If => .None,
             .Else => .None,
             .While => .None,
+            .For => .None,
+            .In => .None,
             .Def => .None,
             .Var => .None,
             .Struct => .None,
@@ -105,6 +114,7 @@ pub const Token = struct {
                     const value_as_string: []const u8 = if (value) "true" else "false";
                     try writer.print("{s}", .{value_as_string});
                 },
+                .Char => |value| try writer.print("{u}", .{value}),
                 .Int => |value| try writer.print("{}", .{value}),
                 .Num => |value| try writer.print("{d}", .{value}),
                 .Str => |value| try writer.print("{s}", .{value}),
@@ -124,6 +134,8 @@ pub const Token = struct {
                 // Operators
                 .Bang => try writer.print("!", .{}),
                 .BangEqual => try writer.print("!=", .{}),
+                .Or => try writer.print("or", .{}),
+                .And => try writer.print("and", .{}),
                 .Plus => try writer.print("+", .{}),
                 .Dash => try writer.print("-", .{}),
                 .Star => try writer.print("*", .{}),
@@ -133,11 +145,14 @@ pub const Token = struct {
                 .LeftAngle => try writer.print("<", .{}),
                 .RightAngle => try writer.print(">", .{}),
                 .Dot => try writer.print(".", .{}),
+                .DoubleDot => try writer.print("..", .{}),
 
                 // Keywords
                 .If => try writer.print("if", .{}),
                 .Else => try writer.print("else", .{}),
                 .While => try writer.print("while", .{}),
+                .For => try writer.print("for", .{}),
+                .In => try writer.print("in", .{}),
                 .Def => try writer.print("def", .{}),
                 .Var => try writer.print("var", .{}),
                 .Struct => try writer.print("struct", .{}),
@@ -153,6 +168,7 @@ pub const Token = struct {
 pub const TokenKind = enum {
     // Literals
     Bool,
+    Char,
     Int,
     Num,
     Str,
@@ -172,6 +188,8 @@ pub const TokenKind = enum {
     // Operators
     Bang,
     BangEqual,
+    Or,
+    And,
     Plus,
     Dash,
     Star,
@@ -181,11 +199,14 @@ pub const TokenKind = enum {
     LeftAngle,
     RightAngle,
     Dot,
+    DoubleDot,
 
     // Keywords
     If,
     Else,
     While,
+    For,
+    In,
     Def,
     Var,
     Struct,
@@ -196,6 +217,7 @@ pub const TokenKind = enum {
 pub const TokenData = union(TokenKind) {
     // Literals
     Bool: bool,
+    Char: Char,
     Int: i64,
     Num: f64,
     Str: []const u8,
@@ -215,6 +237,8 @@ pub const TokenData = union(TokenKind) {
     // Operators
     Bang,
     BangEqual,
+    Or,
+    And,
     Plus,
     Dash,
     Star,
@@ -224,11 +248,14 @@ pub const TokenData = union(TokenKind) {
     LeftAngle,
     RightAngle,
     Dot,
+    DoubleDot,
 
     // Keywords
     If,
     Else,
     While,
+    For,
+    In,
     Def,
     Var,
     Struct,
@@ -242,6 +269,7 @@ pub const TokenData = union(TokenKind) {
         switch (this.*) {
             // Literals
             .Bool => |value| try writer.print(".Bool = {}", .{value}),
+            .Char => |value| try writer.print(".Char = {}", .{value}),
             .Int => |value| try writer.print(".Int = {}", .{value}),
             .Num => |value| try writer.print(".Num = {}", .{value}),
             .Str => |str| try writer.print(".Str = {s}", .{str}),
@@ -261,6 +289,8 @@ pub const TokenData = union(TokenKind) {
             // Operators
             .Bang => _ = try writer.write(".Bang"),
             .BangEqual => _ = try writer.write(".BangEqual"),
+            .Or => _ = try writer.write(".Or"),
+            .And => _ = try writer.write(".And"),
             .Plus => _ = try writer.write(".Plus"),
             .Dash => _ = try writer.write(".Dash"),
             .Star => _ = try writer.write(".Star"),
@@ -270,11 +300,14 @@ pub const TokenData = union(TokenKind) {
             .LeftAngle => _ = try writer.write(".LeftAngle"),
             .RightAngle => _ = try writer.write(".RightAngle"),
             .Dot => _ = try writer.write(".Dot"),
+            .DoubleDot => _ = try writer.write(".DoubleDot"),
 
             // Keywords
             .If => _ = try writer.write(".If"),
             .Else => _ = try writer.write(".Else"),
             .While => _ = try writer.write(".While"),
+            .For => _ = try writer.write(".For"),
+            .In => _ = try writer.write(".In"),
             .Def => _ = try writer.write(".Def"),
             .Var => _ = try writer.write(".Var"),
             .Struct => _ = try writer.write(".Struct"),
@@ -331,7 +364,6 @@ const Tokenizer = struct {
     err_msg: ErrMsg,
 
     const This = @This();
-    const Char = u21;
 
     fn init(allocator: Allocator, source: []const u8, filename: []const u8) !This {
         return This{
@@ -389,7 +421,11 @@ const Tokenizer = struct {
     }
 
     fn isStringBegin(c: Char) bool {
-        return c == '"' or c == '\'';
+        return c == '"'; // or c == '\'';
+    }
+
+    fn isCharBegin(c: Char) bool {
+        return c == '\'';
     }
 
     // @TODO:
@@ -496,8 +532,10 @@ const Tokenizer = struct {
                 token = Token.init(TokenData.Newline, this.token_location);
             } else if (isDigit(c)) {
                 token = this.tokenizeNumber();
+            } else if (isCharBegin(c)) {
+                token = try this.tokenizeTextLiteral(true);
             } else if (isStringBegin(c)) {
-                token = try this.tokenizeString();
+                token = try this.tokenizeTextLiteral(false);
             } else if (isIdentBegin(c)) {
                 token = this.tokenizeIdentOrKeyword();
             } else {
@@ -573,7 +611,7 @@ const Tokenizer = struct {
     // @TODO:
     // Handled escape sequences.
     //
-    fn tokenizeString(this: *This) ParseError!Token {
+    fn tokenizeTextLiteral(this: *This, char: bool) ParseError!Token {
         const terminator = this.nextChar().?;
 
         const start_index = this.source.i;
@@ -591,7 +629,16 @@ const Tokenizer = struct {
         }
 
         const word = this.source.bytes[start_index..end_index];
-        return Token.init(TokenData{ .Str = word }, this.token_location);
+
+        if (char) {
+            if (word.len != 1) {
+                return raise(ParseError.TokenizerError, this.token_location, "Character literal's require 1 character specifically.", &this.err_msg);
+            } else {
+                return Token.init(TokenData{ .Char = word[0] }, this.token_location);
+            }
+        } else {
+            return Token.init(TokenData{ .Str = word }, this.token_location);
+        }
     }
 
     fn tokenizeIdentOrKeyword(this: *This) Token {
@@ -606,12 +653,20 @@ const Tokenizer = struct {
             Token.init(TokenData{ .Bool = true }, this.token_location)
         else if (std.mem.eql(u8, word, "false"))
             Token.init(TokenData{ .Bool = false }, this.token_location)
+        else if (std.mem.eql(u8, word, "or"))
+            Token.init(TokenData.Or, this.token_location)
+        else if (std.mem.eql(u8, word, "and"))
+            Token.init(TokenData.And, this.token_location)
         else if (std.mem.eql(u8, word, "if"))
             Token.init(TokenData.If, this.token_location)
         else if (std.mem.eql(u8, word, "else"))
             Token.init(TokenData.Else, this.token_location)
         else if (std.mem.eql(u8, word, "while"))
             Token.init(TokenData.While, this.token_location)
+        else if (std.mem.eql(u8, word, "for"))
+            Token.init(TokenData.For, this.token_location)
+        else if (std.mem.eql(u8, word, "in"))
+            Token.init(TokenData.In, this.token_location)
         else if (std.mem.eql(u8, word, "def"))
             Token.init(TokenData.Def, this.token_location)
         else if (std.mem.eql(u8, word, "var"))
@@ -650,7 +705,10 @@ const Tokenizer = struct {
                 Token.init(.Equal, this.token_location),
             '<' => Token.init(.LeftAngle, this.token_location),
             '>' => Token.init(.RightAngle, this.token_location),
-            '.' => Token.init(.Dot, this.token_location),
+            '.' => if (this.match('.'))
+                Token.init(.DoubleDot, this.token_location)
+            else
+                Token.init(.Dot, this.token_location),
             else => |c| raise(ParseError.TokenizerError, this.token_location, try std.fmt.allocPrint(this.allocator, "Unknown operator `{u}`", .{c}), &this.err_msg),
         };
     }
@@ -862,6 +920,9 @@ pub const Parser = struct {
             .Bool => |value| {
                 return (try this.createLiteral(.Bool, token, AstLiteral.Literal{ .Bool = value })).asAst();
             },
+            .Char => |value| {
+                return (try this.createLiteral(.Char, token, AstLiteral.Literal{ .Char = value })).asAst();
+            },
             .Int => |value| {
                 return (try this.createLiteral(.Int, token, AstLiteral.Literal{ .Int = value })).asAst();
             },
@@ -899,6 +960,9 @@ pub const Parser = struct {
             },
             .While => {
                 return (try this.parseWhile(token)).asAst();
+            },
+            .For => {
+                return (try this.parseFor(token)).asAst();
             },
             .Var => {
                 return (try this.parseVar(token)).asAst();
@@ -948,6 +1012,9 @@ pub const Parser = struct {
 
                 const node = try this.createNode(AstBinary, .{ .Dot, token, previous, ident.asAst() });
                 return node.asAst();
+            },
+            .DoubleDot => {
+                return (try this.parseBinary(prec, .ExclusiveRange, token, previous)).asAst();
             },
 
             .LeftParen => {
@@ -1068,6 +1135,17 @@ pub const Parser = struct {
         const block = try this.parseBlock();
 
         return this.createNode(AstWhile, .{ token, condition, block });
+    }
+
+    fn parseFor(this: *This, token: Token) anyerror!*AstFor {
+        const iterator = (try this.parseIdent()) orelse {
+            return raise(ParseError.ParserError, token.location, "Expected identifier after `for` keyword.", &this.err_msg);
+        };
+        _ = try this.skipExpect(.In, "Expected `in` keyword in for loop.");
+        const container = try this.parseExpression();
+        const block = try this.parseBlock();
+
+        return this.createNode(AstFor, .{ token, iterator, container, block });
     }
 
     fn parseVar(this: *This, token: Token) anyerror!*AstVar {

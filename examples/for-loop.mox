@@ -1,0 +1,51 @@
+println("For loop over a Range:")
+{
+    var final = for i in 0..5 {
+        println("i:", i)
+        i
+    }
+
+    println("final:", final)
+}
+println("---------")
+
+println("For loop over a String:")
+{
+    var s = "abcdef"
+    for c in s {
+        println("c:", c)
+    }
+}
+println("---------")
+
+println("For loop over a List:")
+{
+    var numbers = [1, 4, 7, 9]
+    for n in numbers {
+        println("n:", n)
+    }
+}
+println("---------")
+
+# For loop over an instance with an `iter()` method
+#{
+#    struct Zipped { a, b }
+#    extend Zipped {
+#        def iter(self) {
+#            ZippedIterator(self.a.iter(), self.b.iter())
+#        }
+#    }
+#
+#    struct Pair { fst, snd }
+#
+#    struct ZippedIterator { a, b }
+#    extend ZippedIterator {
+#        def next(self) {
+#            self.a.next() and self.b.next()
+#        }
+#
+#        def get(self) {
+#            Pair(self.a.get(), self.b.get())
+#        }
+#    }
+#}

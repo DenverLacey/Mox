@@ -17,7 +17,7 @@ const todo = err.todo;
 
 const BucketArrayUnmanaged = @import("bucket_array.zig").BucketArrayUnmanaged;
 
-const DEBUG_ALWAYS_COLLECT         = true;
+const DEBUG_ALWAYS_COLLECT         = false;
 const DEBUG_TRACE_ALLOCATIONS      = false;
 const DEBUG_TRACE_DEALLOCATIONS    = false;
 const DEBUG_LOG_NUM_COLLECTIONS    = false;
@@ -210,7 +210,7 @@ pub const GarbageCollector = struct {
 
     fn markVariable(this: *This, variable: Value) void {
         switch (variable) {
-            .None, .Bool, .Int, .Num => {},
+            .None, .Bool, .Char, .Int, .Num, .Range => {},
             .Str => |value| {
                 for (this.strings.items) |*string| {
                     if (&value[0] == &string.value[0]) {

@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const StringArrayHashMap = std.StringArrayHashMap;
 const StringArrayHashMapUnmanaged = std.StringArrayHashMapUnmanaged;
+const Utf8View = std.unicode.Utf8View;
+const Utf8Iterator = std.unicode.Utf8Iterator;
 
 const CodeLocation = @import("parser.zig").CodeLocation;
 
@@ -16,6 +18,7 @@ const AstBinary = ast.AstBinary;
 const AstBlock = ast.AstBlock;
 const AstIf = ast.AstIf;
 const AstWhile = ast.AstWhile;
+const AstFor = ast.AstFor;
 const AstDef = ast.AstDef;
 const AstVar = ast.AstVar;
 const AstStruct = ast.AstStruct;
@@ -28,6 +31,7 @@ const todo = err.todo;
 
 const val = @import("value.zig");
 const Value = val.Value;
+const Range = val.Range;
 const Closure = val.Closure;
 const Struct = val.Struct;
 const Instance = val.Instance;
@@ -141,7 +145,7 @@ pub const Evaluator = struct {
     fn evaluateNode(this: *This, node: *Ast) anyerror!Value {
         return switch (node.kind) {
             // Literals
-            .Bool, .Int, .Num, .Str => blk: {
+            .Bool, .Char, .Int, .Num, .Str => blk: {
                 const l = node.downcast(AstLiteral);
                 break :blk this.evaluateLiteral(l);
             },
@@ -171,6 +175,7 @@ pub const Evaluator = struct {
             .Index,
             .Call,
             .Dot,
+            .ExclusiveRange,
             => blk: {
                 const binary = node.downcast(AstBinary);
                 break :blk this.evaluateBinary(binary);
@@ -200,6 +205,10 @@ pub const Evaluator = struct {
                 const _while = node.downcast(AstWhile);
                 break :blk this.evaluateWhile(_while);
             },
+            .For => blk: {
+                const _for = node.downcast(AstFor);
+                break :blk this.evaluateFor(_for);
+            },
             .Def => blk: {
                 const def = node.downcast(AstDef);
                 try this.evaluateDef(def);
@@ -226,6 +235,7 @@ pub const Evaluator = struct {
     fn evaluateLiteral(this: *This, literal: *AstLiteral) anyerror!Value {
         return switch (literal.literal) {
             .Bool => |value| Value{ .Bool = value },
+            .Char => |value| Value{ .Char = value },
             .Int => |value| Value{ .Int = value },
             .Num => |value| Value{ .Num = value },
             .Str => |value| blk: {
@@ -298,6 +308,7 @@ pub const Evaluator = struct {
             .Index => this.evaluateIndex(binary.lhs, binary.rhs),
             .Call => this.evaluateCall(binary.lhs, binary.rhs.downcast(AstBlock)),
             .Dot => this.evaluateDot(binary.lhs, binary.rhs.downcast(AstIdent)),
+            .ExclusiveRange => this.evaluateExclusiveRange(binary.lhs, binary.rhs),
             else => raise(error.RuntimeError, binary.token.location, "Invalid binary operation", &this.err_msg),
         };
     }
@@ -447,8 +458,22 @@ pub const Evaluator = struct {
         };
     }
 
-    fn evaluateIndexStr(_: *This, _: []const u8, _: i64, _: CodeLocation) anyerror!Value {
-        todo("Implement Index operator for strings.");
+    fn evaluateIndexStr(this: *This, string: []const u8, index: i64, location: CodeLocation) anyerror!Value {
+        var chars = (try Utf8View.init(string)).iterator();
+
+        var i: usize = 0;
+        while (i < index) : (i += 1) {
+            _ = chars.nextCodepoint();
+        }
+
+        const opt_char = chars.nextCodepoint();
+        if (opt_char == null) {
+            return raise(error.RuntimeError, location, "Array bounds check failure!", &this.err_msg);
+        }
+
+        const char = opt_char.?;
+
+        return Value{ .Char = char };
     }
 
     fn evaluateIndexList(this: *This, list: *std.ArrayListUnmanaged(Value), index: i64, index_location: CodeLocation) anyerror!Value {
@@ -561,6 +586,22 @@ pub const Evaluator = struct {
         }
     }
 
+    fn evaluateExclusiveRange(this: *This, start_node: *Ast, end_node: *Ast) anyerror!Value {
+        const start_value = try this.evaluateNode(start_node);
+        const end_value   = try this.evaluateNode(end_node);
+
+        const start = switch (start_value) {
+            .Int => |value| value,
+            else => return raise(error.RuntimeError, start_node.token.location, "Can only make ranges of integers.", &this.err_msg),
+        };
+        const end = switch (end_value) {
+            .Int => |value| value,
+            else => return raise(error.RuntimeError, end_node.token.location, "Can only make ranges of integers.", &this.err_msg),
+        };
+
+        return Value{ .Range = Range.init(start, end) };
+    }
+
     fn evaluateAssign(this: *This, assign: *AstBinary) anyerror!void {
         switch (assign.lhs.kind) {
             .Ident => try this.evaluateAssignIdent(assign.lhs.downcast(AstIdent), assign.rhs),
@@ -580,8 +621,8 @@ pub const Evaluator = struct {
         const container = try this.evaluateNode(target.lhs);
 
         switch (container) {
-            .Str => todo("Implement index-assign for Str."),
-            .List => |rc| try this.evaluateAssignIndexList(rc, target.rhs, expr),
+            .Str => todo("Implement `evaluateAssignIndex()` for strings."),
+            .List => |value| try this.evaluateAssignIndexList(value, target.rhs, expr),
             else => return raise(error.RuntimeError, target.lhs.token.location, "Cannot index something that isn't a `Str` or a `List`.", &this.err_msg),
         }
     }
@@ -677,10 +718,72 @@ pub const Evaluator = struct {
         return rval;
     }
 
+    fn evaluateFor(this: *This, _for: *AstFor) anyerror!Value {
+        const container = try this.evaluateNode(_for.container);
+        const block = _for.block;
+
+        return switch (container) {
+            .Str => |value| try this.evaluateForLoopForStr(value, _for.iterator, block),
+            .Range => |value| try this.evaluateForLoopForRange(value, _for.iterator, block),
+            .List => |value| try this.evaluateForLoopForList(value, _for.iterator, block),
+            .Instance => |value| try this.evaluateForLoopForInstance(value, _for.iterator, block),
+            else => return raise(error.RuntimeError, _for.container.token.location, "Cannot iterate over a value of this type.", &this.err_msg),
+        };
+    }
+
+    fn evaluateForLoopForStr(this: *This, string: []const u8, it_id: *AstIdent, block: *AstBlock) anyerror!Value {
+        var rval: Value = .None;
+
+        var chars = (try Utf8View.init(string)).iterator();
+        while (chars.nextCodepoint()) |c| {
+            try this.beginScope();
+            defer this.endScope();
+
+            _ = try this.currentScope().addVariable(it_id.ident, Value{ .Char = c }, it_id.token.location, &this.err_msg);
+            rval = try this.evaluateBlock(block);
+        }
+
+        return rval;
+    }
+
+    fn evaluateForLoopForRange(this: *This, range: Range, it_id: *AstIdent, block: *AstBlock) anyerror!Value {
+        var rval: Value = .None;
+
+        var i = range.start;
+        while (i < range.end) : (i += 1) {
+            try this.beginScope();
+            defer this.endScope();
+
+            _ = try this.currentScope().addVariable(it_id.ident, Value{ .Int = i }, it_id.token.location, &this.err_msg);
+            rval = try this.evaluateBlock(block);
+        }
+
+        return rval;
+    }
+
+    fn evaluateForLoopForList(this: *This, list: *ArrayListUnmanaged(Value), it_id: *AstIdent, block: *AstBlock) anyerror!Value {
+        var rval: Value = .None;
+        
+        for (list.items) |value| {
+            try this.beginScope();
+            defer this.endScope();
+
+            _ = try this.currentScope().addVariable(it_id.ident, value, it_id.token.location, &this.err_msg);
+            rval = try this.evaluateBlock(block);
+        }
+
+        return rval;
+    }
+
+    fn evaluateForLoopForInstance(this: *This, instance: *Instance, it_id: *AstIdent, block: *AstBlock) anyerror!Value {
+        todo("Implement `evaluateForLoopInstance()`");
+        std.debug.print("{}{}{}{}", .{this, instance, it_id, block});
+    }
+
     fn evaluateDef(this: *This, def: *AstDef) anyerror!void {
-        const closure_rc = try this.createDefClosure(def);
-        const closure = Value{ .Closure = closure_rc };
-        _ = try this.currentScope().addVariable(def.name, closure, def.token.location, &this.err_msg);
+        const closure = try this.createDefClosure(def);
+        const closure_value = Value{ .Closure = closure };
+        _ = try this.currentScope().addVariable(def.name, closure_value, def.token.location, &this.err_msg);
     }
 
     fn createDefClosure(this: *This, def: *AstDef) anyerror!*Closure {

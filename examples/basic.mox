@@ -7,4 +7,11 @@
         var name = s
         println(name)
     }
+
+    var c = 'a'
+    println(c)
+
+    for i in 0..6 {
+        println("s[", i, "]:", s[i])
+    }
 }

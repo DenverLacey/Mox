@@ -10,7 +10,7 @@
             "name": "Debug",
             "program": "${workspaceFolder}/zig-out/bin/Mox",
             "args": [
-                "examples/basic.mox"
+                "examples/for-loop.mox"
             ],
             "cwd": "${workspaceFolder}"
         }

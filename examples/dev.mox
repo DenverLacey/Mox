@@ -64,4 +64,12 @@ println("5 < 6:", x)
 println("5 > 6:", y)
 println("foo == bar:", z)
 
+var w = if z {
+    "z is true"
+} else {
+    "z is false"
+}
+
+println("w:", w)
+
 # This is a comment at the end of the file

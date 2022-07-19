@@ -1,6 +1,9 @@
 const std = @import("std");
+
 const parser = @import("parser.zig");
 const Token = parser.Token;
+
+const Char = @import("value.zig").Char;
 
 pub const Ast = struct {
     kind: AstKind,
@@ -63,6 +66,7 @@ pub const Ast = struct {
 pub const AstKind = enum {
     // Literals
     Bool,
+    Char,
     Int,
     Num,
     Str,
@@ -86,6 +90,7 @@ pub const AstKind = enum {
     Index,
     Call,
     Dot,
+    ExclusiveRange,
 
     // Blocks
     Block,
@@ -94,6 +99,7 @@ pub const AstKind = enum {
 
     If,
     While,
+    For,
     Def,
     Var,
     Struct,
@@ -109,6 +115,7 @@ pub const AstLiteral = struct {
 
     pub const Literal = union(enum) {
         Bool: bool,
+        Char: Char,
         Int: i64,
         Num: f64,
         Str: []const u8,
@@ -220,6 +227,24 @@ pub const AstWhile = struct {
 
     pub fn init(token: Token, condition: *Ast, block: *AstBlock) This {
         return This{ .kind = .While, .token = token, .condition = condition, .block = block };
+    }
+
+    pub fn asAst(this: *This) *Ast {
+        return @ptrCast(*Ast, this);
+    }
+};
+
+pub const AstFor = struct {
+    kind: AstKind,
+    token: Token,
+    iterator: *AstIdent,
+    container: *Ast,
+    block: *AstBlock,
+
+    const This = @This();
+
+    pub fn init(token: Token, iterator: *AstIdent, container: *Ast, block: *AstBlock) This {
+        return This{ .kind = .For, .token = token, .iterator = iterator, .container = container, .block = block };
     }
 
     pub fn asAst(this: *This) *Ast {
