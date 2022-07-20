@@ -65,6 +65,7 @@ pub const Ast = struct {
 
 pub const AstKind = enum {
     // Literals
+    Null,
     Bool,
     Char,
     Int,
@@ -114,6 +115,7 @@ pub const AstLiteral = struct {
     const This = @This();
 
     pub const Literal = union(enum) {
+        Null,
         Bool: bool,
         Char: Char,
         Int: i64,

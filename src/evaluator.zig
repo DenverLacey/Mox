@@ -74,6 +74,18 @@ pub const Scope = struct {
         var it: ?*Scope = this;
 
         while (it) |scope| {
+
+// {
+//     std.debug.print("::: SCOPE:\n        next: {p}\n", .{scope.parent});
+//     std.debug.print("        variables:\n", .{});
+
+//     var scope_variables = scope.variables.iterator();
+//     while (scope_variables.next()) |entry| {
+//         std.debug.print("        {s}: {}\n", .{entry.key_ptr.*, entry.value_ptr.*});
+//     }
+//     std.debug.print("\n", .{});
+// }
+
             if (scope.variables.getPtr(ident)) |value| {
                 return value;
             }
@@ -145,7 +157,7 @@ pub const Evaluator = struct {
     fn evaluateNode(this: *This, node: *Ast) anyerror!Value {
         return switch (node.kind) {
             // Literals
-            .Bool, .Char, .Int, .Num, .Str => blk: {
+            .Null, .Bool, .Char, .Int, .Num, .Str => blk: {
                 const l = node.downcast(AstLiteral);
                 break :blk this.evaluateLiteral(l);
             },
@@ -234,6 +246,7 @@ pub const Evaluator = struct {
 
     fn evaluateLiteral(this: *This, literal: *AstLiteral) anyerror!Value {
         return switch (literal.literal) {
+            .Null => Value.None,
             .Bool => |value| Value{ .Bool = value },
             .Char => |value| Value{ .Char = value },
             .Int => |value| Value{ .Int = value },
@@ -492,10 +505,7 @@ pub const Evaluator = struct {
     }
 
     fn setupScopeForClosureCall(this: *This, scope: *Scope, closure: *Closure, args: *AstBlock) anyerror!void {
-        var it = closure.closed_values.iterator();
-        while (it.next()) |entry| {
-            _ = try scope.addVariable(entry.key_ptr.*, entry.value_ptr.*, args.token.location, &this.err_msg);
-        }
+        try this.injectClosedValuesIntoScope(closure, scope, args.token.location);
 
         if (args.nodes.len != closure.params.len) {
             return raise(error.RuntimeError, args.token.location, try std.fmt.allocPrint(this.allocator, "Inccorect number of arguments! `{s}` expects {} arguments but was given {}.", .{ closure.name, closure.params.len, args.nodes.len }), &this.err_msg);
@@ -506,6 +516,13 @@ pub const Evaluator = struct {
             const arg_name = closure.params[i].name;
             const arg_value = try this.evaluateNode(args.nodes[i]);
             _ = try scope.addVariable(arg_name, arg_value, args.nodes[i].token.location, &this.err_msg);
+        }
+    }
+
+    fn injectClosedValuesIntoScope(this: *This, closure: *Closure, scope: *Scope, location: CodeLocation) anyerror!void {
+        var it = closure.closed_values.iterator();
+        while (it.next()) |entry| {
+            _ = try scope.addVariable(entry.key_ptr.*, entry.value_ptr.*, location, &this.err_msg);
         }
     }
 
@@ -559,12 +576,37 @@ pub const Evaluator = struct {
     }
 
     fn evaluateDot(this: *This, instance_node: *Ast, field_ident_node: *AstIdent) anyerror!Value {
-        const instance = try this.evaluateNode(instance_node);
+        const instance_value = try this.evaluateNode(instance_node);
 
-        return switch (instance) {
-            .Instance => |rc| this.evaluateDotInstance(rc, field_ident_node),
+        return switch (instance_value) {
+            .List => |list| this.evaluateDotList(list, field_ident_node),
+            .Struct => |_struct| this.evaluateDotStruct(_struct, field_ident_node),
+            .Instance => |instance| this.evaluateDotInstance(instance, field_ident_node),
             else => raise(error.RuntimeError, instance_node.token.location, "`.` requires its first operand to be an instance of a struct.", &this.err_msg),
         };
+    }
+
+    fn evaluateDotList(this: *This, list: *ArrayListUnmanaged(Value), field_ident_node: *AstIdent) anyerror!Value {
+        const ident = field_ident_node.ident;
+
+        if (std.mem.eql(u8, ident, "len")) {
+            return Value{ .Int = @intCast(i64, list.items.len) };
+        } else {
+            return raise(error.RuntimeError, field_ident_node.token.location, "List does not have a field with this name.", &this.err_msg);
+        }
+    }
+
+    fn evaluateDotStruct(this: *This, _struct: *Struct, field_ident_node: *AstIdent) anyerror!Value {
+        const ident = field_ident_node.ident;
+
+        if (_struct.methods.get(ident)) |method| {
+            const receiver = Value{ .Struct = _struct };
+            const bound_closure = try method.makeBound(this.allocator, receiver, field_ident_node.token.location, &this.err_msg);
+            const allocated_bound_closure = try this.gc.allocateClosure(bound_closure);
+            return Value{ .Closure = allocated_bound_closure };
+        } else {
+            return raise(error.RuntimeError, field_ident_node.token.location, "Struct does not have a method with this name.", &this.err_msg);
+        }
     }
 
     fn evaluateDotInstance(
@@ -776,8 +818,97 @@ pub const Evaluator = struct {
     }
 
     fn evaluateForLoopForInstance(this: *This, instance: *Instance, it_id: *AstIdent, block: *AstBlock) anyerror!Value {
-        todo("Implement `evaluateForLoopInstance()`");
-        std.debug.print("{}{}{}{}", .{this, instance, it_id, block});
+        var rval: Value = .None;
+
+        if (instance._struct.methods.getPtr("iter")) |iter_method_ptr| {
+            const iter_method = iter_method_ptr.*;
+
+            if (iter_method.params.len != 1) {
+                return raise(error.RuntimeError, it_id.token.location, "To iterate over an instance, its `iter()` method must only take a `self` parameter.", &this.err_msg);
+            }
+
+            const bound_iter_method = try this.gc.allocateClosure(try iter_method.makeBound(this.allocator, Value{ .Instance = instance }, it_id.token.location, &this.err_msg));
+
+            // @TODO:
+            // figure actual scope stuff
+            //
+            var method_scope = Scope.init(this.allocator, this.global_scope);
+            try this.injectClosedValuesIntoScope(bound_iter_method, &method_scope, it_id.token.location);
+
+            try this.pushScope(method_scope);
+            defer this.endScope();
+
+            const iter_instance = switch (try this.callClosure(bound_iter_method)) {
+                .Instance => |value| value,
+                else => return raise(error.RuntimeError, it_id.token.location, "`iter()` expected to return an instance.", &this.err_msg),
+            };
+
+            rval = try this.evaluateForLoopForIteratorInstance(iter_instance, it_id, block);
+        } else {
+            rval = try this.evaluateForLoopForIteratorInstance(instance, it_id, block);
+        }
+
+        return rval;
+    }
+
+    fn evaluateForLoopForIteratorInstance(this: *This, iterator: *Instance, it_id: *AstIdent, block: *AstBlock) anyerror!Value {
+        const next_method = (iterator._struct.methods.getPtr("next") orelse {
+            return raise(error.RuntimeError, it_id.token.location, "Cannot use something that doesn't have a `next()` method as an iterator.", &this.err_msg);
+        }).*;
+        const get_method = (iterator._struct.methods.getPtr("get") orelse {
+            return raise(error.RuntimeError, it_id.token.location, "Cannot use something that doesn't have a `get()` method as an iterator.", &this.err_msg);
+        }).*;
+
+        if (next_method.params.len != 1) {
+            return raise(error.RuntimeError, it_id.token.location, "To iterate over an instance, its `next()` method must only take a `self` parameter.", &this.err_msg);
+        }
+        if (get_method.params.len != 1) {
+            return raise(error.RuntimeError, it_id.token.location, "To iterate over an instance, its `get()` method must only take a `self` parameter.", &this.err_msg);
+        }
+
+        const bound_next_method = try this.gc.allocateClosure(try next_method.makeBound(this.allocator, Value{ .Instance = iterator }, it_id.token.location, &this.err_msg));
+        const bound_get_method = try this.gc.allocateClosure(try get_method.makeBound(this.allocator, Value{ .Instance = iterator }, it_id.token.location, &this.err_msg));
+
+        var rval: Value = .None;
+
+        while (true) {
+            {
+                var method_scope = Scope.init(this.allocator, this.global_scope);
+                try this.injectClosedValuesIntoScope(bound_next_method, &method_scope, it_id.token.location);
+
+                try this.pushScope(method_scope);
+                defer this.endScope();
+
+                const result = try this.callClosure(bound_next_method);
+
+                if (!result.isTrue()) {
+                    break;
+                }
+            }
+
+            // call `get()` to evaluate the next value of the iteration
+            const iteration_value = blk: {
+                var method_scope = Scope.init(this.allocator, this.global_scope);
+                try this.injectClosedValuesIntoScope(bound_get_method, &method_scope, it_id.token.location);
+
+                try this.pushScope(method_scope);
+                defer this.endScope();
+
+                const result = try this.callClosure(bound_get_method);
+                break :blk result;
+            };
+
+            // evaluate block with current iteration value
+            {
+                try this.beginScope();
+                defer this.endScope();
+
+                _ = try this.currentScope().addVariable(it_id.ident, iteration_value, it_id.token.location, &this.err_msg);
+                rval = try this.evaluateBlock(block);
+            }
+        }
+
+        return rval;
     }
 
     fn evaluateDef(this: *This, def: *AstDef) anyerror!void {

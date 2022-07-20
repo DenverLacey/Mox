@@ -58,6 +58,7 @@ pub const Token = struct {
     fn precedence(this: *const Token) TokenPrecedence {
         return switch (this.data) {
             // Literals
+            .Null => .None,
             .Bool => .None,
             .Char => .None,
             .Int => .None,
@@ -110,6 +111,7 @@ pub const Token = struct {
         if (std.mem.eql(u8, fmt, "!")) {
             switch (this.data) {
                 // Literals
+                .Null => _ = try writer.write("null"),
                 .Bool => |value| {
                     const value_as_string: []const u8 = if (value) "true" else "false";
                     try writer.print("{s}", .{value_as_string});
@@ -167,6 +169,7 @@ pub const Token = struct {
 
 pub const TokenKind = enum {
     // Literals
+    Null,
     Bool,
     Char,
     Int,
@@ -216,6 +219,7 @@ pub const TokenKind = enum {
 
 pub const TokenData = union(TokenKind) {
     // Literals
+    Null,
     Bool: bool,
     Char: Char,
     Int: i64,
@@ -268,6 +272,7 @@ pub const TokenData = union(TokenKind) {
         try writer.print("{s} {{ ", .{@typeName(This)});
         switch (this.*) {
             // Literals
+            .Null => _ = try writer.write(".Null"),
             .Bool => |value| try writer.print(".Bool = {}", .{value}),
             .Char => |value| try writer.print(".Char = {}", .{value}),
             .Int => |value| try writer.print(".Int = {}", .{value}),
@@ -649,7 +654,9 @@ const Tokenizer = struct {
         }
         const word = this.source.bytes[start_index..end_index];
 
-        return if (std.mem.eql(u8, word, "true"))
+        return if (std.mem.eql(u8, word, "null"))
+            Token.init(TokenData.Null, this.token_location)
+        else if (std.mem.eql(u8, word, "true"))
             Token.init(TokenData{ .Bool = true }, this.token_location)
         else if (std.mem.eql(u8, word, "false"))
             Token.init(TokenData{ .Bool = false }, this.token_location)
@@ -917,6 +924,9 @@ pub const Parser = struct {
     fn parsePrefix(this: *This, token: Token) anyerror!*Ast {
         switch (token.data) {
             // Literals
+            .Null => {
+                return (try this.createLiteral(.Null, token, AstLiteral.Literal.Null)).asAst();
+            },
             .Bool => |value| {
                 return (try this.createLiteral(.Bool, token, AstLiteral.Literal{ .Bool = value })).asAst();
             },
@@ -1025,7 +1035,7 @@ pub const Parser = struct {
                 return call.asAst();
             },
             .LeftSquare => {
-                const expr = (try this.parseBinary(prec, .Index, token, previous)).asAst();
+                const expr = (try this.parseBinary(.Assignment, .Index, token, previous)).asAst();
                 _ = try this.expect(.RightSquare, "Expected `]` to terminate index operator.");
                 return expr;
             },

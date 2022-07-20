@@ -1,0 +1,24 @@
+struct ListIterator {
+    list
+    index
+}
+
+extend ListIterator {
+    def new(cls, list) {
+        cls(list, -1)
+    }
+
+    def next(self) {
+        self.index = self.index + 1
+        self.index < self.list.len
+    }
+
+    def get(self) {
+        self.list[self.index]
+    }
+}
+
+var it = ListIterator.new([1, 2, 3, 4, 5])
+for i in it {
+    println("i:", i)
+}

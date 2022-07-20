@@ -27,25 +27,36 @@ println("For loop over a List:")
 }
 println("---------")
 
-# For loop over an instance with an `iter()` method
-#{
-#    struct Zipped { a, b }
-#    extend Zipped {
-#        def iter(self) {
-#            ZippedIterator(self.a.iter(), self.b.iter())
-#        }
-#    }
-#
-#    struct Pair { fst, snd }
-#
-#    struct ZippedIterator { a, b }
-#    extend ZippedIterator {
-#        def next(self) {
-#            self.a.next() and self.b.next()
-#        }
-#
-#        def get(self) {
-#            Pair(self.a.get(), self.b.get())
-#        }
-#    }
-#}
+println("For loop over an instance with an `iter()` method:")
+struct LinkedList {
+    value
+    next
+}
+
+struct LinkedListIterator {
+    node
+}
+
+extend LinkedList {
+    def iter(self) {
+        LinkedListIterator(self)
+    }
+}
+
+extend LinkedListIterator {
+    def next(self) {
+        self.node != null
+    }
+
+    def get(self) {
+        var n = self.node.value
+        self.node = self.node.next
+        n
+    }
+}
+
+var list = LinkedList(1, LinkedList(2, LinkedList(3, null)))
+for n in list {
+    println("n:", n)
+}
+println("---------")

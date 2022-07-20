@@ -106,7 +106,7 @@ pub const Value = union(ValueKind) {
 
     pub fn format(this: *const This, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
         switch (this.*) {
-            .None => try writer.print("none", .{}),
+            .None => try writer.print("null", .{}),
             .Bool => |value| try writer.print("{}", .{value}),
             .Char => |value| try writer.print("{u}", .{value}),
             .Int => |value| try writer.print("{}", .{value}),
