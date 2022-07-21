@@ -32,6 +32,7 @@ const todo = err.todo;
 const val = @import("value.zig");
 const Value = val.Value;
 const Range = val.Range;
+const List = val.List;
 const Closure = val.Closure;
 const Struct = val.Struct;
 const Instance = val.Instance;
@@ -41,6 +42,8 @@ const GarbageCollector = @import("gc.zig").GarbageCollector;
 const BucketArrayUnmanaged = @import("bucket_array.zig").BucketArrayUnmanaged;
 
 const DEBUG_PRINT_BASE_NODE_RESULTS = false;
+const DEBUG_PRINT_SCOPE_VAR_LOOKUP  = false;
+
 pub const SCOPE_BUCKET_SIZE = 8;
 
 pub const Scope = struct {
@@ -74,17 +77,21 @@ pub const Scope = struct {
         var it: ?*Scope = this;
 
         while (it) |scope| {
+            if (DEBUG_PRINT_SCOPE_VAR_LOOKUP) {
+                std.debug.print("::: SCOPE:\n", .{});
+                if (scope.parent) |parent| {
+                    std.debug.print(":::     next: {}\n", .{&parent});
+                } else {
+                    std.debug.print(":::     next: null\n", .{});
+                }
+                std.debug.print(":::     variables:\n", .{});
 
-// {
-//     std.debug.print("::: SCOPE:\n        next: {p}\n", .{scope.parent});
-//     std.debug.print("        variables:\n", .{});
-
-//     var scope_variables = scope.variables.iterator();
-//     while (scope_variables.next()) |entry| {
-//         std.debug.print("        {s}: {}\n", .{entry.key_ptr.*, entry.value_ptr.*});
-//     }
-//     std.debug.print("\n", .{});
-// }
+                var scope_variables = scope.variables.iterator();
+                while (scope_variables.next()) |entry| {
+                    std.debug.print(":::         {s}: {}\n", .{entry.key_ptr.*, entry.value_ptr.*});
+                }
+                std.debug.print("\n", .{});
+            }
 
             if (scope.variables.getPtr(ident)) |value| {
                 return value;
@@ -489,7 +496,7 @@ pub const Evaluator = struct {
         return Value{ .Char = char };
     }
 
-    fn evaluateIndexList(this: *This, list: *std.ArrayListUnmanaged(Value), index: i64, index_location: CodeLocation) anyerror!Value {
+    fn evaluateIndexList(this: *This, list: *List, index: i64, index_location: CodeLocation) anyerror!Value {
         try arrayBoundsCheck(Value, list.items, @intCast(usize, index), index_location, &this.err_msg);
         return list.items[@intCast(usize, index)];
     }
@@ -586,7 +593,7 @@ pub const Evaluator = struct {
         };
     }
 
-    fn evaluateDotList(this: *This, list: *ArrayListUnmanaged(Value), field_ident_node: *AstIdent) anyerror!Value {
+    fn evaluateDotList(this: *This, list: *List, field_ident_node: *AstIdent) anyerror!Value {
         const ident = field_ident_node.ident;
 
         if (std.mem.eql(u8, ident, "len")) {
@@ -690,7 +697,7 @@ pub const Evaluator = struct {
         field_ptr.* = try this.evaluateNode(expr);
     }
 
-    fn evaluateAssignIndexList(this: *This, list: *std.ArrayListUnmanaged(Value), index_node: *Ast, expr: *Ast) anyerror!void {
+    fn evaluateAssignIndexList(this: *This, list: *List, index_node: *Ast, expr: *Ast) anyerror!void {
         const index = switch (try this.evaluateNode(index_node)) {
             .Int => |value| value,
             else => return raise(error.RuntimeError, index_node.token.location, "Cannot index a container with something other than an `Int`.", &this.err_msg),
@@ -722,7 +729,7 @@ pub const Evaluator = struct {
 
     fn evaluateList(this: *This, list: *AstBlock) anyerror!Value {
         var items = try this.gc.allocateList();
-        items.* = try std.ArrayListUnmanaged(Value).initCapacity(this.allocator, list.nodes.len);
+        items.* = try List.initCapacity(this.allocator, list.nodes.len);
 
         for (list.nodes) |node| {
             try items.append(this.allocator, try this.evaluateNode(node));
@@ -803,7 +810,7 @@ pub const Evaluator = struct {
         return rval;
     }
 
-    fn evaluateForLoopForList(this: *This, list: *ArrayListUnmanaged(Value), it_id: *AstIdent, block: *AstBlock) anyerror!Value {
+    fn evaluateForLoopForList(this: *This, list: *List, it_id: *AstIdent, block: *AstBlock) anyerror!Value {
         var rval: Value = .None;
         
         for (list.items) |value| {

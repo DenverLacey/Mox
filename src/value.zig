@@ -19,7 +19,7 @@ pub const Value = union(ValueKind) {
     Num: f64,
     Str: []const u8,
     Range: Range,
-    List: *ArrayListUnmanaged(Value),
+    List: *List,
     Closure: *Closure,
     Struct: *Struct,
     Instance: *Instance,
@@ -172,6 +172,8 @@ pub const Range = struct {
         try writer.print("{}..{}", .{this.start, this.end});
     }
 };
+
+pub const List = ArrayListUnmanaged(Value);
 
 pub const Closure = struct {
     name: []const u8,

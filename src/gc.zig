@@ -8,6 +8,7 @@ const Scope = evaluator.Scope;
 
 const val = @import("value.zig");
 const Value = val.Value;
+const List = val.List;
 const Closure = val.Closure;
 const Struct = val.Struct;
 const Instance = val.Instance;
@@ -38,7 +39,7 @@ pub const GarbageCollector = struct {
     allocator: Allocator,
 
     strings: ArrayListUnmanaged(GCValue([]const u8)),
-    lists: ArrayListUnmanaged(GCValue(*ArrayListUnmanaged(Value))),
+    lists: ArrayListUnmanaged(GCValue(*List)),
     closures: ArrayListUnmanaged(GCValue(*Closure)),
     structs: ArrayListUnmanaged(GCValue(*Struct)),
     instances: ArrayListUnmanaged(GCValue(*Instance)),
@@ -50,7 +51,7 @@ pub const GarbageCollector = struct {
         return This{
             .allocator = allocator,
             .strings = ArrayListUnmanaged(GCValue([]const u8)){},
-            .lists = ArrayListUnmanaged(GCValue(*ArrayListUnmanaged(Value))){},
+            .lists = ArrayListUnmanaged(GCValue(*List)){},
             .closures = ArrayListUnmanaged(GCValue(*Closure)){},
             .structs = ArrayListUnmanaged(GCValue(*Struct)){},
             .instances = ArrayListUnmanaged(GCValue(*Instance)){},
@@ -102,15 +103,15 @@ pub const GarbageCollector = struct {
         return allocated;
     }
 
-    pub fn allocateList(this: *This) !*ArrayListUnmanaged(Value) {
-        const list = try this.allocator.create(ArrayListUnmanaged(Value));
+    pub fn allocateList(this: *This) !*List {
+        const list = try this.allocator.create(List);
 
         if (DEBUG_TRACE_ALLOCATIONS) {
             std.debug.print("::: ALLOCATING LIST\n", .{});
             debug_num_allocations += 1;
         }
 
-        try this.lists.append(this.allocator, GCValue(*ArrayListUnmanaged(Value)){ .marked = false, .value = list });
+        try this.lists.append(this.allocator, GCValue(*List){ .marked = false, .value = list });
         return list;
     }
 
@@ -190,7 +191,7 @@ pub const GarbageCollector = struct {
 
     fn resetValuesForCollection(this: *This) void {
         resetValuesForCollectionInList([]const u8, &this.strings);
-        resetValuesForCollectionInList(*ArrayListUnmanaged(Value), &this.lists);
+        resetValuesForCollectionInList(*List, &this.lists);
         resetValuesForCollectionInList(*Closure, &this.closures);
         resetValuesForCollectionInList(*Struct, &this.structs);
         resetValuesForCollectionInList(*Instance, &this.instances);
@@ -272,7 +273,7 @@ pub const GarbageCollector = struct {
 
     fn freeUnmarkedValues(this: *This) void {
         this.freeUnmarkedStrings(&this.strings);
-        this.freeUnmarkedValuesInList(*ArrayListUnmanaged(Value), &this.lists);
+        this.freeUnmarkedValuesInList(*List, &this.lists);
         this.freeUnmarkedValuesInList(*Closure, &this.closures);
         this.freeUnmarkedValuesInList(*Struct, &this.structs);
         this.freeUnmarkedValuesInList(*Instance, &this.instances);
